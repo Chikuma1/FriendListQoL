@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
@@ -128,6 +129,11 @@ public sealed class Plugin : IDalamudPlugin
             var status = FriendRemover.AttemptFullAutomation ? "ON (experimental)" : "OFF (guided mode)";
             _chatGui.Print($"[FLQoL] Full automation attempt: {status}");
         }
+        else if (arg.StartsWith("setselect ", StringComparison.OrdinalIgnoreCase))
+        {
+            var name = arg.Substring("setselect ".Length).Trim();
+            TestSetSelection(name);
+        }
         else
         {
             MainWindow.Toggle();
@@ -135,4 +141,46 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void OnLogin() => FriendCache.RequestRefresh();
+
+    /// <summary>
+    /// Test command: sets AgentFriendlist.SelectedContentId to the given friend's
+    /// content ID without starting a purge. Used to verify if the programmatic
+    /// selection overrides a manual right-click.
+    /// </summary>
+    private unsafe void TestSetSelection(string name)
+    {
+        var friend = FriendCache.Friends.FirstOrDefault(f => 
+            f.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (friend == null)
+        {
+            _chatGui.Print($"[FLQoL] Friend '{name}' not found.");
+            return;
+        }
+
+        try
+        {
+            var agentModule = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentModule.Instance();
+            if (agentModule == null)
+            {
+                _chatGui.Print("[FLQoL] AgentModule not available.");
+                return;
+            }
+
+            var agent = agentModule->GetAgentByInternalId(
+                FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentId.Friendlist);
+            if (agent == null || agent == (FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentInterface*)nint.Zero)
+            {
+                _chatGui.Print("[FLQoL] AgentFriendlist not available.");
+                return;
+            }
+
+            var friendAgent = (FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentFriendlist*)agent;
+            friendAgent->SelectedContentId = friend.ContentId;
+            _chatGui.Print($"[FLQoL] Set selection to {friend.Name} (contentId={friend.ContentId}). Now right-click a DIFFERENT friend → Remove, and check whose name is in the dialog. Click No.");
+        }
+        catch (Exception ex)
+        {
+            _chatGui.Print($"[FLQoL] Failed: {ex.Message}");
+        }
+    }
 }

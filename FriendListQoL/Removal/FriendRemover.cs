@@ -219,7 +219,12 @@ public sealed unsafe class FriendRemover : IDisposable
 
     /// <summary>
     /// Fired when the game's Yes/No dialog opens. If we're waiting on a
-    /// removal confirmation, click "Yes" to complete this friend's removal.
+    /// removal confirmation, verify the dialog is for the expected friend
+    /// and click "Yes" to complete this friend's removal.
+    /// <para/>
+    /// SAFETY: The prompt must contain the current target's name. This prevents
+    /// accidentally confirming a dialog for a different friend (e.g., if the
+    /// user manually triggered a remove on someone else).
     /// </summary>
     private unsafe void OnConfirmDialogOpened(AddonEvent type, AddonArgs args)
     {
@@ -229,6 +234,24 @@ public sealed unsafe class FriendRemover : IDisposable
         var addon = (AddonSelectYesno*)(nint)args.Addon;
         if (addon == null || !args.Addon.IsVisible)
             return;
+
+        // Safety: verify the dialog is for the expected friend
+        if (_current != null && !SimulateRemovals)
+        {
+            var prompt = addon->PromptText != null
+                ? addon->PromptText->NodeText.ToString()
+                : string.Empty;
+            
+            // The prompt should contain the friend's name
+            // Use the first name part (before space) for matching, as the prompt
+            // may have formatting codes
+            var firstName = _current.Name.Split(' ')[0];
+            if (!prompt.Contains(firstName, StringComparison.OrdinalIgnoreCase))
+            {
+                _log.Warning($"SelectYesno dialog prompt doesn't match expected friend '{_current.Name}'. Prompt: '{prompt}'. NOT auto-confirming.");
+                return;
+            }
+        }
 
         if (ClickYes(addon))
         {
