@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game;
 using Dalamud.Game.Addon.Lifecycle;
+using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using FriendListQoL.Models;
 
@@ -216,8 +218,8 @@ public sealed unsafe class FriendRemover : IDisposable
         if (_step != Step.WaitingForConfirm || _confirmClicked)
             return;
 
-        var addon = (AddonSelectYesno*)args.Addon;
-        if (addon == null || !addon->AtkUnitBase.IsVisible)
+        var addon = (AddonSelectYesno*)(nint)args.Addon;
+        if (addon == null || !args.Addon.IsVisible)
             return;
 
         if (ClickYes(addon))
@@ -253,9 +255,9 @@ public sealed unsafe class FriendRemover : IDisposable
         try
         {
             var values = stackalloc AtkValue[1];
-            values[0].Type = ValueType.Int;
+            values[0].Type = AtkValueType.Int;
             values[0].Int = 0; // 0 = Yes, 1 = No (verify in-game)
-            addon->AtkUnitBase.FireCallback(1, values);
+            addon->AtkUnitBase.FireCallback(1, values, false);
             return true;
         }
         catch

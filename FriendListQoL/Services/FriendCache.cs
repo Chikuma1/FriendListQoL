@@ -27,7 +27,7 @@ public sealed unsafe class FriendCache : IDisposable
     private DateTime _lastSeenSave = DateTime.MinValue;
 
     public List<FriendEntry> Friends { get; private set; } = new();
-    public event Action? Changed;
+    public event System.Action? Changed;
 
     /// <summary>
     /// When true, the cache serves generated fake friends instead of reading

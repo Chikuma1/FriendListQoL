@@ -23,7 +23,15 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Download Dalamud
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/latest.zip" -OutFile dalamud.zip
+          Expand-Archive dalamud.zip -DestinationPath dalamud
+
       - name: Build
+        env:
+          DALAMUD_HOME: ${{ github.workspace }}/dalamud
         run: dotnet build FriendListQoL/FriendListQoL.csproj -c Release
 
       - name: Zip plugin

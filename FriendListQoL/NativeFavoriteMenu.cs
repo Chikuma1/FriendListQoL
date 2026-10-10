@@ -26,7 +26,7 @@ public sealed class NativeFavoriteMenu : IDisposable
         _contextMenu.OnMenuOpened -= OnMenuOpened;
     }
 
-    private void OnMenuOpened(MenuOpenedArgs args)
+    private void OnMenuOpened(IMenuOpenedArgs args)
     {
         // Only react to the game's Friend List window. (Verify in-game: this
         // is the addon name the game reports when its friend list rows are
