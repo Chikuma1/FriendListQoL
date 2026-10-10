@@ -57,6 +57,12 @@ public sealed unsafe class FriendRemover : IDisposable
     public bool HasFinished => _step == Step.Finished;
     public bool HasFailed => _step == Step.Failed;
 
+    /// <summary>
+    /// True when we're waiting for the user to manually trigger the remove
+    /// (right-click → Remove from Friend List) in guided mode.
+    /// </summary>
+    public bool IsWaitingForUser => _step == Step.WaitingForConfirm && !SimulateRemovals && !_confirmClicked;
+
     public int TotalCount { get; private set; }
     public int RemovedCount => _removedNames.Count;
     public int RemainingCount => _queue.Count + (_current != null && IsRunning ? 1 : 0);
@@ -180,10 +186,11 @@ public sealed unsafe class FriendRemover : IDisposable
                     if (now >= _simConfirmAt)
                         CompleteCurrentRemoval();
                 }
-                else if (now > _confirmDeadline)
+                else if (!IsWaitingForUser && now > _confirmDeadline)
                 {
-                    Fail($"The game's confirmation dialog never appeared for {_current?.Name}. " +
-                         "The remove trigger needs calibration — see README.");
+                    // Guided mode: no timeout, user triggers at their own pace.
+                    // This branch is for fully-automated mode (not yet implemented).
+                    Fail($"The game's confirmation dialog never appeared for {_current?.Name}.");
                 }
                 StateChanged?.Invoke();
                 break;
@@ -269,6 +276,13 @@ public sealed unsafe class FriendRemover : IDisposable
     /// <summary>
     /// Drives the game's own remove-friend flow for one friend.
     /// Returns true once the game's confirmation dialog should be on its way.
+    /// <para/>
+    /// GUIDED MODE: The plugin cannot programmatically click the game's
+    /// "Remove from Friend List" context menu item (the handler is internal
+    /// to the game and wasn't capturable via calibration). Instead, the user
+    /// manually right-clicks → Remove for each friend, and the plugin
+    /// auto-clicks Yes on the confirmation dialog, tracks progress, and
+    /// advances the queue.
     /// </summary>
     private bool TriggerGameRemove(FriendEntry entry)
     {
@@ -287,25 +301,11 @@ public sealed unsafe class FriendRemover : IDisposable
             return false;
         }
 
-        // ═══════════════════════════════════════════════════════════════════
-        // ⚠ IN-GAME CALIBRATION REQUIRED — see README "Calibrating removal".
-        //
-        // Manually, removing a friend is: right-click their row in the game's
-        // Friend List → context menu → the remove entry → confirm dialog.
-        //
-        // To finish this method:
-        //   1. In a scratch plugin, hook AtkUnitBase.FireCallback and log
-        //      (addon name, callback id, values).
-        //   2. Manually remove one friend via the game's Friend List.
-        //   3. Note the callback id + values the game fires for row selection
-        //      and for the context-menu "remove" choice.
-        //   4. Replay those calls here for the target's row, then delete this
-        //      early-return.
-        //
-        // Until then this refuses to run so the queue can never fire blind.
-        // ═══════════════════════════════════════════════════════════════════
-        _log.Warning($"Remove trigger not calibrated; refusing to remove {entry.Name}.");
-        Error = "The removal driver isn't calibrated yet — see README 'Calibrating removal'.";
-        return false;
+        // Guided mode: prompt the user to manually trigger the remove.
+        // OnConfirmDialogOpened will auto-click Yes when the dialog appears.
+        // No timeout — the user works at their own pace, cancels if needed.
+        _confirmDeadline = DateTime.MaxValue;
+        _log.Info($"Guided removal: right-click → 'Remove from Friend List' on {entry.Name}. Auto-confirming when the dialog opens.");
+        return true;
     }
 }

@@ -198,8 +198,17 @@ public class MainWindow : Window, IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Cancel", new Vector2(110, 0)))
                 remover.Cancel();
-            if (!string.IsNullOrEmpty(remover.CurrentName))
+            if (remover.IsWaitingForUser && !string.IsNullOrEmpty(remover.CurrentName))
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(1.0f, 0.85f, 0.3f, 1.0f), "Next: right-click → 'Remove from Friend List' on:");
+                ImGui.Text($"  {remover.CurrentName}");
+                ImGui.TextDisabled("The plugin will auto-click Yes on the confirmation.");
+            }
+            else if (!string.IsNullOrEmpty(remover.CurrentName))
+            {
                 ImGui.TextDisabled($"Removing: {remover.CurrentName}");
+            }
             return;
         }
 
@@ -228,9 +237,14 @@ public class MainWindow : Window, IDisposable
             var action = _plugin.TestMode ? "SIMULATE removing" : "Remove";
             ImGui.TextColored(DangerColor,
                 $"{action} {selected.Count} friends? Favorites are never touched.");
+            if (!_plugin.TestMode)
+            {
+                ImGui.TextDisabled("Guided mode: you'll right-click → 'Remove from Friend List' on each friend.");
+                ImGui.TextDisabled("The plugin auto-clicks Yes and tracks progress.");
+            }
             ImGui.TextDisabled("Preview: " + string.Join(", ", selected.Take(6).Select(e => e.Name)) +
                                (selected.Count > 6 ? $" (+{selected.Count - 6} more)" : ""));
-            var confirmLabel = _plugin.TestMode ? "Yes, simulate it" : "Yes, remove them all";
+            var confirmLabel = _plugin.TestMode ? "Yes, simulate it" : "Yes, start guided purge";
             if (ImGui.Button(confirmLabel, new Vector2(200, 0)))
             {
                 _purgeArmed = false;
