@@ -20,6 +20,7 @@ public sealed class Plugin : IDalamudPlugin
     public FriendCache FriendCache { get; }
     public FriendRemover FriendRemover { get; }
     private NativeFavoriteMenu NativeFavoriteMenu { get; }
+    private CalibrationService CalibrationService { get; }
 
     /// <summary>
     /// Test mode: the friend list shows 60 fake friends and purges are
@@ -66,6 +67,7 @@ public sealed class Plugin : IDalamudPlugin
         FriendRemover = new FriendRemover(log, framework, gameGui, addonLifecycle, Configuration);
         FriendRemover.OnSimulatedRemove = id => FriendCache.RemoveTestFriend(id);
         NativeFavoriteMenu = new NativeFavoriteMenu(contextMenu, Configuration);
+        CalibrationService = new CalibrationService(log, addonLifecycle, contextMenu);
 
         MainWindow = new MainWindow(this);
         ConfigWindow = new ConfigWindow(this);
@@ -96,6 +98,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface.UiBuilder.OpenConfigUi -= ConfigWindow.Toggle;
         WindowSystem.RemoveAllWindows();
         NativeFavoriteMenu.Dispose();
+        CalibrationService.Dispose();
         FriendRemover.Dispose();
         FriendCache.Dispose();
     }
@@ -111,6 +114,10 @@ public sealed class Plugin : IDalamudPlugin
         {
             TestMode = !TestMode;
             MainWindow.IsOpen = true;
+        }
+        else if (arg.Equals("calibrate", StringComparison.OrdinalIgnoreCase))
+        {
+            CalibrationService.SetActive(!CalibrationService.IsActive);
         }
         else
         {
