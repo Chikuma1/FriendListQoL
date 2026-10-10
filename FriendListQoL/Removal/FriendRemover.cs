@@ -276,10 +276,7 @@ public sealed unsafe class FriendRemover : IDisposable
     }
 
     /// <summary>
-    /// Clicks "Yes" on a SelectYesno dialog.
-    /// ⚠ VERIFY IN-GAME: the callback value below is the commonly observed one
-    /// for "yes", but confirm it with a FireCallback trace before trusting a
-    /// bulk run. If it misbehaves, use ClickLib's ClickSelectYesno instead.
+    /// Clicks "Yes" on a SelectYesno dialog and closes it.
     /// </summary>
     private static bool ClickYes(AddonSelectYesno* addon)
     {
@@ -287,8 +284,8 @@ public sealed unsafe class FriendRemover : IDisposable
         {
             var values = stackalloc AtkValue[1];
             values[0].Type = AtkValueType.Int;
-            values[0].Int = 0; // 0 = Yes, 1 = No (verify in-game)
-            addon->AtkUnitBase.FireCallback(1, values, false);
+            values[0].Int = 0; // 0 = Yes, 1 = No
+            addon->AtkUnitBase.FireCallback(1, values, true); // true = close dialog after callback
             return true;
         }
         catch
