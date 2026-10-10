@@ -68,7 +68,7 @@ public sealed class Plugin : IDalamudPlugin
         FriendRemover = new FriendRemover(log, framework, gameGui, addonLifecycle, Configuration);
         FriendRemover.OnSimulatedRemove = id => FriendCache.RemoveTestFriend(id);
         NativeFavoriteMenu = new NativeFavoriteMenu(contextMenu, Configuration);
-        CalibrationService = new CalibrationService(log, addonLifecycle, contextMenu, chatGui, PluginInterface.GetPluginConfigDirectory());
+        CalibrationService = new CalibrationService(log, addonLifecycle, contextMenu, chatGui, gameGui, PluginInterface.GetPluginConfigDirectory());
 
         MainWindow = new MainWindow(this);
         ConfigWindow = new ConfigWindow(this);

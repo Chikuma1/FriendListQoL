@@ -5,7 +5,9 @@ using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.Gui.ContextMenu;
 using Dalamud.Game.Text;
 using Dalamud.Plugin.Services;
+using FFXIVClientStructs.FFXIV.Client.System.Framework;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace FriendListQoL;
@@ -23,17 +25,19 @@ public sealed class CalibrationService : IDisposable
     private readonly IAddonLifecycle _addonLifecycle;
     private readonly IContextMenu _contextMenu;
     private readonly IChatGui _chatGui;
+    private readonly IGameGui _gameGui;
     private readonly StreamWriter _file;
     private readonly object _fileLock = new();
 
     public bool IsActive { get; private set; }
 
-    public CalibrationService(IPluginLog log, IAddonLifecycle addonLifecycle, IContextMenu contextMenu, IChatGui chatGui, string configDirectory)
+    public CalibrationService(IPluginLog log, IAddonLifecycle addonLifecycle, IContextMenu contextMenu, IChatGui chatGui, IGameGui gameGui, string configDirectory)
     {
         _log = log;
         _addonLifecycle = addonLifecycle;
         _contextMenu = contextMenu;
         _chatGui = chatGui;
+        _gameGui = gameGui;
         var path = Path.Combine(configDirectory, "calibration.log");
         _file = new StreamWriter(path, append: true) { AutoFlush = true };
     }
@@ -93,6 +97,46 @@ public sealed class CalibrationService : IDisposable
             target = args.Target?.GetType().Name ?? "null";
 
         Log($"MenuOpened: addon='{args.AddonName}' menuType={args.MenuType} target=[{target}]");
+        LogAgentState("MenuOpened");
+    }
+
+    /// <summary>
+    /// Dumps AgentFriendlist state: selected index and list info.
+    /// This helps us correlate the right-click target with the agent's selection.
+    /// </summary>
+    private unsafe void LogAgentState(string context)
+    {
+        try
+        {
+            var agentModule = AgentModule.Instance();
+            if (agentModule == null)
+            {
+                Log($"AgentState[{context}]: AgentModule is null");
+                return;
+            }
+
+            var agent = agentModule->GetAgentByInternalId(AgentId.Friendlist);
+            if (agent == null || agent == (AgentInterface*)nint.Zero)
+            {
+                Log($"AgentState[{context}]: AgentFriendlist not found");
+                return;
+            }
+
+            var friendAgent = (AgentFriendlist*)agent;
+            Log($"AgentState[{context}]: AgentFriendlist*={(nint)friendAgent:X}");
+            
+            // Try to get the FriendList addon and its list state
+            var addonPtr = _gameGui.GetAddonByName("FriendList");
+            if (addonPtr != nint.Zero)
+            {
+                var addon = (AddonFriendList*)addonPtr.Address;
+                Log($"AgentState[{context}]: AddonFriendList*={(nint)addon:X}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"AgentState[{context}]: failed: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private static bool IsRelevantAddon(string addonName) =>
@@ -106,11 +150,20 @@ public sealed class CalibrationService : IDisposable
             return;
 
         // Only log addons involved in the remove flow — everything else is noise.
+        // Skip per-frame update events to keep the log clean.
         if (!IsRelevantAddon(args.AddonName))
+            return;
+        if (type is AddonEvent.PreUpdate or AddonEvent.PostUpdate or AddonEvent.PreDraw or AddonEvent.PostDraw)
             return;
 
         var stamp = DateTime.Now.ToString("HH:mm:ss.fff");
         var msg = $"{stamp} AddonEvent={type} addon='{args.AddonName}'";
+
+        // Log agent state when FriendList receives events (the remove click goes through here)
+        if (args.AddonName == "FriendList" && type is AddonEvent.PreReceiveEvent or AddonEvent.PostReceiveEvent)
+        {
+            LogAgentState($"ReceiveEvent-{type}");
+        }
 
         // Capture SelectYesno dialog details — this is the removal confirmation.
         if (args.AddonName == "SelectYesno")
