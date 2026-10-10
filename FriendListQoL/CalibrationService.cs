@@ -123,7 +123,7 @@ public sealed class CalibrationService : IDisposable
             }
 
             var friendAgent = (AgentFriendlist*)agent;
-            Log($"AgentState[{context}]: AgentFriendlist*={(nint)friendAgent:X}");
+            Log($"AgentState[{context}]: AgentFriendlist*={(nint)friendAgent:X} SelectedContentId={friendAgent->SelectedContentId} SelectedIndex={friendAgent->SelectedIndex}");
             
             // Try to get the FriendList addon and its list state
             var addonPtr = _gameGui.GetAddonByName("FriendList");
@@ -132,10 +132,49 @@ public sealed class CalibrationService : IDisposable
                 var addon = (AddonFriendList*)addonPtr.Address;
                 Log($"AgentState[{context}]: AddonFriendList*={(nint)addon:X}");
             }
+
+            // Inspect AgentContext for menu event IDs
+            LogContextMenuState(context, agentModule);
         }
         catch (Exception ex)
         {
             Log($"AgentState[{context}]: failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Inspects AgentContext's menu to find event IDs for menu items.
+    /// The "Remove from Friend List" item has a specific event ID we need to capture.
+    /// </summary>
+    private unsafe void LogContextMenuState(string context, AgentModule* agentModule)
+    {
+        try
+        {
+            var ctxAgent = agentModule->GetAgentByInternalId(AgentId.Context);
+            if (ctxAgent == null || ctxAgent == (AgentInterface*)nint.Zero)
+                return;
+
+            var ctx = (AgentContext*)ctxAgent;
+            Log($"ContextState[{context}]: TargetContentId={ctx->TargetContentId} TargetName='{ctx->TargetName}'");
+            Log($"ContextState[{context}]: YesNoTargetContentId={ctx->YesNoTargetContentId} YesNoEventId={ctx->YesNoEventId}");
+
+            // Read the main context menu's event IDs
+            // _eventIds is at offset 0x448, array of 34 ints (event IDs)
+            var menu = &ctx->MainContextMenu;
+            var eventCount = menu->CurrentEventIndex;
+            Log($"ContextState[{context}]: Menu has {eventCount} items, CurrentEventId={menu->CurrentEventId}");
+            
+            // Read event IDs directly from memory (offset 0x448, 34 x int32)
+            var eventIdsPtr = (int*)((byte*)menu + 0x448);
+            for (int i = 0; i < eventCount && i < 34; i++)
+            {
+                var eventId = eventIdsPtr[i];
+                Log($"ContextState[{context}]: MenuItem[{i}] EventId={eventId}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"ContextState[{context}]: failed: {ex.GetType().Name}");
         }
     }
 
