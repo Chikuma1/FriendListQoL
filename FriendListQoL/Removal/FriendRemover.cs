@@ -255,7 +255,7 @@ public sealed unsafe class FriendRemover : IDisposable
         try
         {
             var values = stackalloc AtkValue[1];
-            values[0].Type = AtkValueType.Int;
+            values[0].Type = FFXIVClientStructs.FFXIV.Component.GUI.ValueType.Int;
             values[0].Int = 0; // 0 = Yes, 1 = No (verify in-game)
             addon->AtkUnitBase.FireCallback(1, values, false);
             return true;

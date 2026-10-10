@@ -23,10 +23,10 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Download Dalamud
+      - name: Download Dalamud (API 14)
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/latest.zip" -OutFile dalamud.zip
+          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/goatcorp/dalamud-distrib/6fb2b120/latest.zip" -OutFile dalamud.zip
           Expand-Archive dalamud.zip -DestinationPath dalamud
 
       - name: Build
@@ -37,9 +37,8 @@ jobs:
       - name: Zip plugin
         shell: pwsh
         run: |
-          $out = Get-ChildItem "FriendListQoL/bin/Release" -Directory |
-                 Get-ChildItem -Directory -Filter "FriendListQoL" | Select-Object -First 1
-          Compress-Archive -Path "$($out.FullName)/*" -DestinationPath FriendListQoL.zip -Force
+          $zip = Get-ChildItem "FriendListQoL/bin/Release" -Recurse -Filter "latest.zip" | Select-Object -First 1
+          Copy-Item $zip.FullName -Destination "FriendListQoL.zip"
 
       - name: Create release
         uses: softprops/action-gh-release@v2
