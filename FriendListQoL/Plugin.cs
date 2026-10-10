@@ -44,6 +44,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private readonly ICommandManager _commands;
     private readonly IClientState _clientState;
+    private readonly IChatGui _chatGui;
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -61,6 +62,7 @@ public sealed class Plugin : IDalamudPlugin
         PluginInterface = pluginInterface;
         _commands = commandManager;
         _clientState = clientState;
+        _chatGui = chatGui;
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
@@ -119,6 +121,12 @@ public sealed class Plugin : IDalamudPlugin
         else if (arg.Equals("calibrate", StringComparison.OrdinalIgnoreCase))
         {
             CalibrationService.SetActive(!CalibrationService.IsActive);
+        }
+        else if (arg.Equals("fullauto", StringComparison.OrdinalIgnoreCase))
+        {
+            FriendRemover.AttemptFullAutomation = !FriendRemover.AttemptFullAutomation;
+            var status = FriendRemover.AttemptFullAutomation ? "ON (experimental)" : "OFF (guided mode)";
+            _chatGui.Print($"[FLQoL] Full automation attempt: {status}");
         }
         else
         {

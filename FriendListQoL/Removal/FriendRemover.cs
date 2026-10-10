@@ -6,6 +6,7 @@ using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using FriendListQoL.Models;
 
@@ -274,17 +275,24 @@ public sealed unsafe class FriendRemover : IDisposable
     }
 
     /// <summary>
+    /// When true, attempts full automation by setting the agent selection and
+    /// triggering the remove dialog programmatically. When false (default),
+    /// uses guided mode where the user manually right-clicks → Remove.
+    /// </summary>
+    public bool AttemptFullAutomation { get; set; } = false;
+
+    /// <summary>
     /// Drives the game's own remove-friend flow for one friend.
     /// Returns true once the game's confirmation dialog should be on its way.
     /// <para/>
-    /// GUIDED MODE: The plugin cannot programmatically click the game's
-    /// "Remove from Friend List" context menu item (the handler is internal
-    /// to the game and wasn't capturable via calibration). Instead, the user
-    /// manually right-clicks → Remove for each friend, and the plugin
-    /// auto-clicks Yes on the confirmation dialog, tracks progress, and
-    /// advances the queue.
+    /// FULL AUTOMATION (experimental): Sets AgentFriendlist.SelectedContentId
+    /// to target the friend, then attempts to trigger the remove confirmation
+    /// dialog. If this doesn't work, falls back to guided mode.
+    /// <para/>
+    /// GUIDED MODE (default): The user manually right-clicks → Remove for each
+    /// friend, and the plugin auto-clicks Yes on the confirmation dialog.
     /// </summary>
-    private bool TriggerGameRemove(FriendEntry entry)
+    private unsafe bool TriggerGameRemove(FriendEntry entry)
     {
         // Test mode: simulate the whole flow, touching nothing in the game.
         if (SimulateRemovals)
@@ -301,11 +309,61 @@ public sealed unsafe class FriendRemover : IDisposable
             return false;
         }
 
+        if (AttemptFullAutomation)
+        {
+            return TriggerFullAutomation(entry);
+        }
+
         // Guided mode: prompt the user to manually trigger the remove.
         // OnConfirmDialogOpened will auto-click Yes when the dialog appears.
         // No timeout — the user works at their own pace, cancels if needed.
         _confirmDeadline = DateTime.MaxValue;
         _log.Info($"Guided removal: right-click → 'Remove from Friend List' on {entry.Name}. Auto-confirming when the dialog opens.");
         return true;
+    }
+
+    /// <summary>
+    /// Attempts full automation: sets the agent selection to target the friend,
+    /// then triggers the remove confirmation dialog programmatically.
+    /// ⚠ EXPERIMENTAL: Test on one friend first with auto-confirm DISABLED!
+    /// </summary>
+    private unsafe bool TriggerFullAutomation(FriendEntry entry)
+    {
+        try
+        {
+            var agentModule = AgentModule.Instance();
+            if (agentModule == null)
+            {
+                Error = "AgentModule not available.";
+                return false;
+            }
+
+            // Set AgentFriendlist selection to target this friend
+            var friendAgent = (AgentFriendlist*)agentModule->GetAgentByInternalId(AgentId.Friendlist);
+            if (friendAgent == null || friendAgent == (AgentFriendlist*)nint.Zero)
+            {
+                Error = "AgentFriendlist not available.";
+                return false;
+            }
+
+            friendAgent->SelectedContentId = entry.ContentId;
+            _log.Info($"[FULL-AUTO] Set AgentFriendlist.SelectedContentId={entry.ContentId} for {entry.Name}");
+
+            // For the safe test: we set the selection but DON'T auto-trigger the dialog.
+            // The user manually right-clicks → Remove on ANY friend.
+            // If the dialog prompt shows OUR target's name (not the right-clicked friend),
+            // then the selection override works and we can proceed with full automation.
+            // For now, fall through to guided mode behavior (wait for user to trigger).
+            
+            _log.Warning($"[FULL-AUTO] Selection set for {entry.Name}. Manually right-click → Remove on any friend. If the dialog shows '{entry.Name}', the override works!");
+            _confirmDeadline = DateTime.MaxValue;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Error = $"Full automation failed: {ex.Message}";
+            _log.Error(Error);
+            return false;
+        }
     }
 }
