@@ -1,0 +1,26 @@
+name: Build plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build
+        run: dotnet build FriendListQoL/FriendListQoL.csproj -c Release
+
+      - name: Upload plugin zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: FriendListQoL
+          path: FriendListQoL/bin/Release/**/FriendListQoL/

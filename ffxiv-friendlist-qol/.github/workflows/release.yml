@@ -1,0 +1,40 @@
+name: Release plugin
+
+# Push a tag like v1.0.0 to build the zip and attach it to a GitHub Release.
+# The repo.json download links point at the release asset, so Dalamud can
+# install/update the plugin from your custom repository URL.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build
+        run: dotnet build FriendListQoL/FriendListQoL.csproj -c Release
+
+      - name: Zip plugin
+        shell: pwsh
+        run: |
+          $out = Get-ChildItem "FriendListQoL/bin/Release" -Directory |
+                 Get-ChildItem -Directory -Filter "FriendListQoL" | Select-Object -First 1
+          Compress-Archive -Path "$($out.FullName)/*" -DestinationPath FriendListQoL.zip -Force
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: FriendListQoL.zip
+          generate_release_notes: true

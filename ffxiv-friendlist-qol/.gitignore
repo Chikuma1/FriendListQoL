@@ -1,0 +1,14 @@
+# .NET / Dalamud plugin
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+
+# Build artifacts
+*.zip
+
+# OS
+.DS_Store
+Thumbs.db
