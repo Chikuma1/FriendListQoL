@@ -19,7 +19,7 @@ jobs:
       - name: Download Dalamud (API 14)
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri "https://raw.githubusercontent.com/goatcorp/dalamud-distrib/6fb2b120/latest.zip" -OutFile dalamud.zip
+          Invoke-WebRequest -Uri "https://goatcorp.github.io/dalamud-distrib/latest.zip" -OutFile dalamud.zip
           Expand-Archive dalamud.zip -DestinationPath dalamud
 
       - name: Build
