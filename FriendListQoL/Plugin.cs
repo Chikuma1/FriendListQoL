@@ -153,6 +153,16 @@ public sealed class Plugin : IDalamudPlugin
             FriendListQoL.Removal.FullAutoV2.SyncTestReport = report;
             FriendListQoL.Removal.FullAutoV2.DumpContextMenuStructure();
         }
+        else if (arg.Equals("watchmenu", StringComparison.OrdinalIgnoreCase))
+        {
+            var report = new Action<string>(msg => _chatGui.Print($"[FLQoL watchmenu] {msg}"));
+            FriendListQoL.Removal.FullAutoV2.SyncTestReport = report;
+            FriendListQoL.Removal.FullAutoV2.WatchMenuIndices();
+        }
+        else if (arg.Equals("stopwatch", StringComparison.OrdinalIgnoreCase))
+        {
+            FriendListQoL.Removal.FullAutoV2.StopWatch();
+        }
         else if (arg.Equals("capclick", StringComparison.OrdinalIgnoreCase))
         {
             FriendRemover.SyncTestReport = msg => _chatGui.Print($"[FLQoL synctest] {msg}");

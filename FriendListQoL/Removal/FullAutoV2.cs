@@ -465,6 +465,68 @@ public static unsafe class FullAutoV2
         }
     }
 
+    /// <summary>Watches AgentContext menu indices (diagnostic) — hover over menu items to see which index corresponds.</summary>
+    public static void WatchMenuIndices()
+    {
+        try
+        {
+            var ctx = AgentContext.Instance();
+            if (ctx == null)
+            {
+                SyncTestReport?.Invoke("AgentContext not available.");
+                return;
+            }
+            var mainMenu = &ctx->MainContextMenu;
+            SyncTestReport?.Invoke($"Watching... hover over menu items. Current: EventIndex={mainMenu->CurrentEventIndex} EventId={mainMenu->CurrentEventId} Selected={mainMenu->SelectedContextItemIndex}");
+            SyncTestReport?.Invoke("Run /flqol stopwatch to stop. (Poll every 500ms for 30s)");
+            _watching = true;
+            _watchCount = 0;
+            _lastEventIndex = mainMenu->CurrentEventIndex;
+            _lastSelected = mainMenu->SelectedContextItemIndex;
+        }
+        catch (Exception ex)
+        {
+            SyncTestReport?.Invoke($"Watch failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static bool _watching = false;
+    private static int _watchCount = 0;
+    private static short _lastEventIndex = -1;
+    private static byte _lastSelected = 255;
+
+    public static void PollWatch()
+    {
+        if (!_watching) return;
+        try
+        {
+            var ctx = AgentContext.Instance();
+            if (ctx == null) { _watching = false; return; }
+            var mainMenu = &ctx->MainContextMenu;
+            if (mainMenu->CurrentEventIndex != _lastEventIndex || mainMenu->SelectedContextItemIndex != _lastSelected)
+            {
+                _lastEventIndex = mainMenu->CurrentEventIndex;
+                _lastSelected = mainMenu->SelectedContextItemIndex;
+                byte* eventIds = (byte*)mainMenu + 1096;
+                int eid = (_lastEventIndex >= 0 && _lastEventIndex < 34) ? eventIds[_lastEventIndex] : -1;
+                SyncTestReport?.Invoke($"  -> EventIndex={_lastEventIndex} (eventId={eid}) Selected={_lastSelected}");
+            }
+            _watchCount++;
+            if (_watchCount > 1800) // 30s at 60fps
+            {
+                _watching = false;
+                SyncTestReport?.Invoke("Watch stopped (timeout).");
+            }
+        }
+        catch { _watching = false; }
+    }
+
+    public static void StopWatch()
+    {
+        _watching = false;
+        SyncTestReport?.Invoke("Watch stopped.");
+    }
+
     private static void DumpNode(AtkResNode* node, int depth)
     {
         if (node == null || depth > 4)

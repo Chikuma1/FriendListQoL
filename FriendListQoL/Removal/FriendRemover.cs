@@ -189,6 +189,9 @@ public sealed unsafe class FriendRemover : IDisposable
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        // Menu index watcher (diagnostic).
+        FullAutoV2.PollWatch();
+
         // Click-capture calibration watches for the menu independently of the
         // purge state machine.
         if (_capturingClick && FullAutoV2.IsContextMenuVisible(_gameGui))
