@@ -75,7 +75,7 @@ public sealed unsafe class FriendRemover : IDisposable
     /// <summary>Reports synctest progress to the caller (chat).</summary>
     public Action<string>? SyncTestReport { get; set; }
 
-    public bool IsRunning => _step is Step.Triggering or Step.WaitingForConfirm or Step.CoolingDown;
+    public bool IsRunning => _step is Step.Triggering or Step.WaitingForConfirm or Step.CoolingDown or Step.WaitingForContextMenu;
     public bool HasFinished => _step == Step.Finished;
     public bool HasFailed => _step == Step.Failed;
 
