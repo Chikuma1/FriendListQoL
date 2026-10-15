@@ -457,6 +457,13 @@ public static unsafe class FullAutoV2
                     if (eventIds[i] != 0)
                         SyncTestReport?.Invoke($"  eventIds[{i}] = {eventIds[i]}");
                 }
+                // Dump handler params (Int64 array at offset 1408)
+                long* handlerParams = (long*)((byte*)mainMenu + 1408);
+                for (int i = 0; i < 34; i++)
+                {
+                    if (handlerParams[i] != 0)
+                        SyncTestReport?.Invoke($"  handlerParams[{i}] = {handlerParams[i]:X}");
+                }
             }
         }
         catch (Exception ex)
@@ -525,6 +532,42 @@ public static unsafe class FullAutoV2
     {
         _watching = false;
         SyncTestReport?.Invoke("Watch stopped.");
+    }
+
+    /// <summary>Test triggering a menu event by index (diagnostic).</summary>
+    public static unsafe bool TestTriggerEvent(int eventIndex, IPluginLog log)
+    {
+        try
+        {
+            var ctx = AgentContext.Instance();
+            if (ctx == null) return false;
+            var mainMenu = &ctx->MainContextMenu;
+            
+            // Set the indices
+            mainMenu->CurrentEventIndex = (short)eventIndex;
+            mainMenu->SelectedContextItemIndex = 4; // visual index for Remove
+            
+            // Get the handler pointer (array at offset 1136, each is 8 bytes)
+            byte* handlersBase = (byte*)mainMenu + 1136;
+            nint handlerPtr = *(nint*)(handlersBase + eventIndex * 8);
+            if (handlerPtr == 0)
+            {
+                log.Warning($"[FAV2] No handler at index {eventIndex}");
+                return false;
+            }
+            
+            log.Info($"[FAV2] Calling handler at index {eventIndex} (ptr={handlerPtr:X})");
+            // Try calling ReceiveEvent - parameters are guesses
+            var handler = (AtkModuleInterface.AtkEventInterface*)handlerPtr;
+            // eventType 9 is often "click", param is the index
+            handler->ReceiveEvent(null, null, 9, (ulong)eventIndex);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.Error($"[FAV2] TestTriggerEvent failed: {ex.Message}");
+            return false;
+        }
     }
 
     private static void DumpNode(AtkResNode* node, int depth)

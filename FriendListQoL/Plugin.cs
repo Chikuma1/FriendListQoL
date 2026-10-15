@@ -46,6 +46,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager _commands;
     private readonly IClientState _clientState;
     private readonly IChatGui _chatGui;
+    private readonly IPluginLog _pluginLog;
 
     public Plugin(
         IDalamudPluginInterface pluginInterface,
@@ -64,6 +65,7 @@ public sealed class Plugin : IDalamudPlugin
         _commands = commandManager;
         _clientState = clientState;
         _chatGui = chatGui;
+        _pluginLog = log;
 
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
@@ -162,6 +164,22 @@ public sealed class Plugin : IDalamudPlugin
         else if (arg.Equals("stopwatch", StringComparison.OrdinalIgnoreCase))
         {
             FriendListQoL.Removal.FullAutoV2.StopWatch();
+        }
+        else if (arg.StartsWith("testtrigger ", StringComparison.OrdinalIgnoreCase))
+        {
+            var idxStr = arg.Substring("testtrigger ".Length).Trim();
+            if (int.TryParse(idxStr, out var idx))
+            {
+                var report = new Action<string>(msg => _chatGui.Print($"[FLQoL testtrigger] {msg}"));
+                FriendListQoL.Removal.FullAutoV2.SyncTestReport = report;
+                _chatGui.Print($"[FLQoL testtrigger] Triggering event index {idx}...");
+                // Note: menu must already be open via synctest or manual right-click
+                FriendListQoL.Removal.FullAutoV2.TestTriggerEvent(idx, _pluginLog);
+            }
+            else
+            {
+                _chatGui.Print("[FLQoL testtrigger] Usage: /flqol testtrigger <index>");
+            }
         }
         else if (arg.Equals("capclick", StringComparison.OrdinalIgnoreCase))
         {
