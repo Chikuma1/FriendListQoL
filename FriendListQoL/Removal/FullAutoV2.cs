@@ -442,6 +442,22 @@ public static unsafe class FullAutoV2
 
             SyncTestReport?.Invoke($"ContextMenu addon found (id={menuAddon->Id}), visible. Node structure:");
             DumpNode(menuAddon->RootNode, 0);
+
+            // Also dump AgentContext menu data
+            var ctx = AgentContext.Instance();
+            if (ctx != null)
+            {
+                SyncTestReport?.Invoke($"AgentContext: target='{ctx->TargetName}' contentId={ctx->TargetContentId}");
+                var mainMenu = &ctx->MainContextMenu;
+                SyncTestReport?.Invoke($"MainContextMenu: CurrentEventIndex={mainMenu->CurrentEventIndex} CurrentEventId={mainMenu->CurrentEventId} Selected={mainMenu->SelectedContextItemIndex}");
+                // _eventIds is private; read via known offset 1096 (34 bytes)
+                byte* eventIds = (byte*)mainMenu + 1096;
+                for (int i = 0; i < 34; i++)
+                {
+                    if (eventIds[i] != 0)
+                        SyncTestReport?.Invoke($"  eventIds[{i}] = {eventIds[i]}");
+                }
+            }
         }
         catch (Exception ex)
         {
