@@ -31,6 +31,7 @@ namespace FriendListQoL.Removal;
 /// </summary>
 public static unsafe class FullAutoV2
 {
+    public static Action<string>? SyncTestReport { get; set; }
     public const string FriendListAddonName = "FriendList";
     public const string ContextMenuAddonName = "ContextMenu";
     public const string RemoveMenuItemText = "Remove from Friend List";
@@ -423,6 +424,53 @@ public static unsafe class FullAutoV2
         while (child != null)
         {
             CollectText(child, sb);
+            child = child->NextSiblingNode;
+        }
+    }
+
+    /// <summary>Dumps the node structure of the currently-open context menu (diagnostic).</summary>
+    public static void DumpContextMenuStructure()
+    {
+        try
+        {
+            var menuAddon = RaptureAtkUnitManager.Instance()->GetAddonByName("ContextMenu");
+            if (menuAddon == null || !menuAddon->IsVisible)
+            {
+                SyncTestReport?.Invoke("No context menu is currently open. Right-click a friend first, then run this.");
+                return;
+            }
+
+            SyncTestReport?.Invoke($"ContextMenu addon found (id={menuAddon->Id}), visible. Node structure:");
+            DumpNode(menuAddon->RootNode, 0);
+        }
+        catch (Exception ex)
+        {
+            SyncTestReport?.Invoke($"Dump failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static void DumpNode(AtkResNode* node, int depth)
+    {
+        if (node == null || depth > 4)
+            return;
+        var indent = new string(' ', depth * 2);
+        var info = $"[{node->Type}] id={node->NodeId}";
+        if (node->Type == NodeType.Text)
+        {
+            var textNode = (AtkTextNode*)node;
+            var s = textNode->NodeText.ToString();
+            info += $" text='{s}'";
+        }
+        else if (node->Type == NodeType.Collision)
+        {
+            info += " (clickable)";
+        }
+        SyncTestReport?.Invoke($"{indent}{info}");
+
+        var child = node->ChildNode;
+        while (child != null)
+        {
+            DumpNode(child, depth + 1);
             child = child->NextSiblingNode;
         }
     }

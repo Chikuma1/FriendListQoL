@@ -147,6 +147,12 @@ public sealed class Plugin : IDalamudPlugin
                 FriendRemover.BeginSyncTest(friend);
             }
         }
+        else if (arg.Equals("dumpmenu", StringComparison.OrdinalIgnoreCase))
+        {
+            var report = new Action<string>(msg => _chatGui.Print($"[FLQoL dumpmenu] {msg}"));
+            FriendListQoL.Removal.FullAutoV2.SyncTestReport = report;
+            FriendListQoL.Removal.FullAutoV2.DumpContextMenuStructure();
+        }
         else if (arg.Equals("capclick", StringComparison.OrdinalIgnoreCase))
         {
             FriendRemover.SyncTestReport = msg => _chatGui.Print($"[FLQoL synctest] {msg}");
