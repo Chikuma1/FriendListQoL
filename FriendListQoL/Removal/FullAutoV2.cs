@@ -257,10 +257,21 @@ public static unsafe class FullAutoV2
     /// <summary>Concatenates all text nodes under a list item renderer.</summary>
     public static string GetRendererText(AtkComponentListItemRenderer* renderer)
     {
-        if (renderer == null || renderer->OwnerNode == null)
+        if (renderer == null)
             return string.Empty;
         var sb = new StringBuilder();
-        CollectText((AtkResNode*)renderer->OwnerNode, sb);
+        // Path 1: the OwnerNode subtree (component root in the tree).
+        if (renderer->OwnerNode != null)
+            CollectText((AtkResNode*)renderer->OwnerNode, sb);
+        // Path 2: the component's own ULD node list. For list item renderers
+        // the text parts live here; the OwnerNode subtree walk alone was
+        // returning empty text for visibly-rendered rows (v1.0.14 synctest).
+        var uld = renderer->UldManager;
+        if (uld.NodeList != null)
+        {
+            for (var i = 0; i < uld.NodeListCount; i++)
+                CollectText(uld.NodeList[i], sb);
+        }
         return sb.ToString();
     }
 
