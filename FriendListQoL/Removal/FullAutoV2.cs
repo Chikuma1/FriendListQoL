@@ -45,6 +45,18 @@ public static unsafe class FullAutoV2
     public static readonly byte[] CalibrationButtonIds = { 1, 2 };
 
     /// <summary>
+    /// Calibration offset (UI pixels) added to the computed click position.
+    /// Set from Configuration on startup and by /flqol capclick.
+    /// </summary>
+    public static short ClickOffsetX;
+
+    /// <summary>
+    /// Calibration offset (UI pixels) added to the computed click position.
+    /// Set from Configuration on startup and by /flqol capclick.
+    /// </summary>
+    public static short ClickOffsetY;
+
+    /// <summary>
     /// Computes the screen-space center of a node by walking up the parent
     /// chain. A child point (px,py) in node N's local space maps to
     /// N's parent space as (N.X + px * N.ScaleX, N.Y + py * N.ScaleY).
@@ -134,6 +146,9 @@ public static unsafe class FullAutoV2
                 targetNode = (AtkResNode*)renderer->OwnerNode;
 
             var (posX, posY) = GetNodeScreenCenter(targetNode);
+            // Apply the in-game calibrated offset (/flqol capclick).
+            posX = (short)(posX + ClickOffsetX);
+            posY = (short)(posY + ClickOffsetY);
 
             var mouseData = stackalloc AtkEventData.AtkMouseData[1];
             mouseData->PosX = posX;

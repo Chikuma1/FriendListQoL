@@ -28,6 +28,15 @@ public class Configuration : IPluginConfiguration
     /// <summary>User-defined collapsible friend categories.</summary>
     public List<FriendCategory> Categories { get; set; } = new();
 
+    /// <summary>
+    /// Calibration offset (UI pixels) added to the computed right-click
+    /// position. Measured by /flqol capclick from a real right-click;
+    /// adjustable in-game without rebuilding.
+    /// </summary>
+    public short ClickOffsetX { get; set; }
+
+    public short ClickOffsetY { get; set; }
+
     public bool IsConfigWindowOpen { get; set; }
 
     public void Save() => Plugin.PluginInterface.SavePluginConfig(this);

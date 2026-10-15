@@ -29,6 +29,7 @@ public sealed unsafe class FriendRemover : IDisposable
     {
         Idle,
         Triggering,
+        WaitingForFriendList,
         WaitingForContextMenu,
         WaitingForConfirm,
         CoolingDown,
@@ -49,6 +50,7 @@ public sealed unsafe class FriendRemover : IDisposable
     private readonly IPluginLog _log;
     private readonly IFramework _framework;
     private readonly IGameGui _gameGui;
+    private readonly ICommandManager _commands;
     private readonly IAddonLifecycle _addonLifecycle;
     private readonly Configuration _config;
 
@@ -64,6 +66,11 @@ public sealed unsafe class FriendRemover : IDisposable
     private bool _confirmClicked;
     private int _syncTestButtonIndex;
     private byte _lastSynthButtonId = FullAutoV2.RightButtonId;
+    private bool _capturingClick;
+    private DateTime _friendListDeadline = DateTime.MinValue;
+
+    /// <summary>How long to wait for the Friend List to open after /friendlist.</summary>
+    private static readonly TimeSpan FriendListTimeout = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// When true, the v2 flow stops after the context menu opens (used by
@@ -75,7 +82,7 @@ public sealed unsafe class FriendRemover : IDisposable
     /// <summary>Reports synctest progress to the caller (chat).</summary>
     public Action<string>? SyncTestReport { get; set; }
 
-    public bool IsRunning => _step is Step.Triggering or Step.WaitingForConfirm or Step.CoolingDown or Step.WaitingForContextMenu;
+    public bool IsRunning => _step is Step.Triggering or Step.WaitingForFriendList or Step.WaitingForConfirm or Step.CoolingDown or Step.WaitingForContextMenu;
     public bool HasFinished => _step == Step.Finished;
     public bool HasFailed => _step == Step.Failed;
 
@@ -104,11 +111,12 @@ public sealed unsafe class FriendRemover : IDisposable
 
     public event Action? StateChanged;
 
-    public FriendRemover(IPluginLog log, IFramework framework, IGameGui gameGui, IAddonLifecycle addonLifecycle, Configuration config)
+    public FriendRemover(IPluginLog log, IFramework framework, IGameGui gameGui, ICommandManager commands, IAddonLifecycle addonLifecycle, Configuration config)
     {
         _log = log;
         _framework = framework;
         _gameGui = gameGui;
+        _commands = commands;
         _addonLifecycle = addonLifecycle;
         _config = config;
 
@@ -228,6 +236,23 @@ public sealed unsafe class FriendRemover : IDisposable
                 StateChanged?.Invoke();
                 break;
 
+            case Step.WaitingForFriendList:
+                if (FullAutoV2.GetFriendListAddon(_gameGui) != null)
+                {
+                    _log.Info("[FAV2] Friend List opened; proceeding with synctest click.");
+                    TriggerSyncTestClick();
+                }
+                else if (now > _friendListDeadline)
+                {
+                    if (SyncTestMode)
+                    {
+                        ReportSyncTest("The Friend List didn't open after /friendlist. Open it manually and run synctest again.");
+                        SyncTestMode = false;
+                    }
+                    Fail("The Friend List didn't open.");
+                }
+                StateChanged?.Invoke();
+                break;
             case Step.WaitingForContextMenu:
                 if (now > _contextMenuDeadline)
                 {
@@ -303,6 +328,31 @@ public sealed unsafe class FriendRemover : IDisposable
         _current = _queue.Dequeue();
         _confirmClicked = false;
         ReportSyncTest($"Starting synctest for '{entry.Name}' (contentId={entry.ContentId}).");
+
+        if (FullAutoV2.GetFriendListAddon(_gameGui) == null)
+        {
+            // Open the Friend List via the game's own command, then wait for it.
+            _commands.ProcessCommand("/friendlist");
+            _friendListDeadline = DateTime.UtcNow + FriendListTimeout;
+            _step = Step.WaitingForFriendList;
+            ReportSyncTest("Friend List wasn't open — opening it via /friendlist...");
+            StateChanged?.Invoke();
+            return;
+        }
+
+        TriggerSyncTestClick();
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>Runs the v2 click synthesis for the current synctest entry.</summary>
+    private void TriggerSyncTestClick()
+    {
+        if (_current == null)
+        {
+            SyncTestMode = false;
+            Fail("Synctest lost its target entry.");
+            return;
+        }
         if (TriggerFullAutomationV2(_current))
         {
             _step = Step.WaitingForContextMenu;
@@ -313,7 +363,100 @@ public sealed unsafe class FriendRemover : IDisposable
             SyncTestMode = false;
             Fail(Error ?? "Failed to trigger the synthesized right-click.");
         }
-        StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Starts click-capture calibration: the user right-clicks any friend row
+    /// (the real thing, which is known to work) and the plugin measures where
+    /// the context menu opened versus where it computes the row to be. The
+    /// difference is saved as the click offset — no rebuilds needed.
+    /// </summary>
+    public void BeginClickCapture()
+    {
+        if (FullAutoV2.GetFriendListAddon(_gameGui) == null)
+            _commands.ProcessCommand("/friendlist");
+        _capturingClick = true;
+        ReportSyncTest("Right-click any friend row in your Friend List — I'll measure where the menu opened.");
+        _log.Info("[FAV2] Click capture armed; waiting for a real right-click.");
+    }
+
+    /// <summary>Clears the calibrated click offset back to zero.</summary>
+    public void ResetClickOffset()
+    {
+        _config.ClickOffsetX = 0;
+        _config.ClickOffsetY = 0;
+        _config.Save();
+        FullAutoV2.ClickOffsetX = 0;
+        FullAutoV2.ClickOffsetY = 0;
+        ReportSyncTest("Click offset reset to (0,0).");
+    }
+
+    /// <summary>
+    /// Handles a real right-click while capture is armed: reads the context
+    /// menu's screen position (it opens at the cursor) and the targeted
+    /// friend, diffs against our computed row position, and saves the offset.
+    /// </summary>
+    private void HandleClickCapture(AddonArgs args)
+    {
+        _capturingClick = false;
+        try
+        {
+            var agentModule = AgentModule.Instance();
+            string targetName = string.Empty;
+            if (agentModule != null)
+            {
+                var ctxAgent = agentModule->GetAgentByInternalId(AgentId.Context);
+                if (ctxAgent != null && ctxAgent != (AgentInterface*)nint.Zero)
+                    targetName = ((AgentContext*)ctxAgent)->TargetName.ToString();
+            }
+
+            var menu = (AtkUnitBase*)args.Addon.Address;
+            short menuX = 0, menuY = 0;
+            if (menu != null && menu->RootNode != null)
+            {
+                menuX = (short)menu->RootNode->X;
+                menuY = (short)menu->RootNode->Y;
+            }
+
+            var addon = FullAutoV2.GetFriendListAddon(_gameGui);
+            int rowIndex = -1;
+            short calcX = 0, calcY = 0;
+            if (addon != null && !string.IsNullOrEmpty(targetName))
+            {
+                rowIndex = FullAutoV2.FindFriendRowIndex(addon, targetName, _log);
+                if (rowIndex >= 0)
+                {
+                    var renderer = FullAutoV2.FindRendererForListIndex(addon->FriendList, rowIndex);
+                    AtkResNode* targetNode = null;
+                    if (renderer != null && renderer->OwnerNode != null)
+                        targetNode = (AtkResNode*)renderer->OwnerNode;
+                    (calcX, calcY) = FullAutoV2.GetNodeScreenCenter(targetNode);
+                }
+            }
+
+            _log.Info($"[FAV2] Click capture: target='{targetName}' row={rowIndex} menuPos=({menuX},{menuY}) computedPos=({calcX},{calcY}).");
+
+            if (string.IsNullOrEmpty(targetName) || rowIndex < 0)
+            {
+                ReportSyncTest($"Capture got target '{targetName}' but couldn't map it to a friend-list row. Try again, right-clicking a row directly.");
+                return;
+            }
+
+            var offX = (short)(menuX - calcX);
+            var offY = (short)(menuY - calcY);
+            _config.ClickOffsetX = offX;
+            _config.ClickOffsetY = offY;
+            _config.Save();
+            FullAutoV2.ClickOffsetX = offX;
+            FullAutoV2.ClickOffsetY = offY;
+
+            ReportSyncTest($"Captured '{targetName}': menu opened at ({menuX},{menuY}), we computed ({calcX},{calcY}). Click offset saved as ({offX},{offY}). Run synctest again.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"[FAV2] Click capture failed: {ex.GetType().Name}: {ex.Message}");
+            ReportSyncTest($"Click capture failed: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -452,6 +595,11 @@ public sealed unsafe class FriendRemover : IDisposable
     /// </summary>
     private unsafe void OnContextMenuOpened(AddonEvent type, AddonArgs args)
     {
+        if (_capturingClick)
+        {
+            HandleClickCapture(args);
+            return;
+        }
         if (_step != Step.WaitingForContextMenu || _current == null)
             return;
         if (!AttemptFullAutomation && !SyncTestMode)

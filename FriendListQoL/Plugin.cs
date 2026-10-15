@@ -68,8 +68,10 @@ public sealed class Plugin : IDalamudPlugin
         Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
         FriendCache = new FriendCache(Configuration, log, framework, gameInteropProvider, dataManager);
-        FriendRemover = new FriendRemover(log, framework, gameGui, addonLifecycle, Configuration);
+        FriendRemover = new FriendRemover(log, framework, gameGui, commandManager, addonLifecycle, Configuration);
         FriendRemover.OnSimulatedRemove = id => FriendCache.RemoveTestFriend(id);
+        Removal.FullAutoV2.ClickOffsetX = Configuration.ClickOffsetX;
+        Removal.FullAutoV2.ClickOffsetY = Configuration.ClickOffsetY;
         NativeFavoriteMenu = new NativeFavoriteMenu(contextMenu, Configuration);
         CalibrationService = new CalibrationService(log, addonLifecycle, contextMenu, chatGui, gameGui, PluginInterface.GetPluginConfigDirectory());
 
@@ -141,9 +143,19 @@ public sealed class Plugin : IDalamudPlugin
             else
             {
                 FriendRemover.SyncTestReport = msg => _chatGui.Print($"[FLQoL synctest] {msg}");
-                _chatGui.Print($"[FLQoL] Synctest targeting '{friend.Name}' — safe, nothing will be removed. Open your Friend List first.");
+                _chatGui.Print($"[FLQoL] Synctest targeting '{friend.Name}' — safe, nothing will be removed.");
                 FriendRemover.BeginSyncTest(friend);
             }
+        }
+        else if (arg.Equals("capclick", StringComparison.OrdinalIgnoreCase))
+        {
+            FriendRemover.SyncTestReport = msg => _chatGui.Print($"[FLQoL synctest] {msg}");
+            FriendRemover.BeginClickCapture();
+        }
+        else if (arg.Equals("calreset", StringComparison.OrdinalIgnoreCase))
+        {
+            FriendRemover.SyncTestReport = msg => _chatGui.Print($"[FLQoL synctest] {msg}");
+            FriendRemover.ResetClickOffset();
         }
         else if (arg.StartsWith("setselect ", StringComparison.OrdinalIgnoreCase))
         {
