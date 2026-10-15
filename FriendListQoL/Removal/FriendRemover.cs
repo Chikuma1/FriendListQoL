@@ -64,8 +64,6 @@ public sealed unsafe class FriendRemover : IDisposable
     private DateTime _contextMenuDeadline = DateTime.MinValue;
     private DateTime _simConfirmAt = DateTime.MinValue;
     private bool _confirmClicked;
-    private int _syncTestButtonIndex;
-    private byte _lastSynthButtonId = FullAutoV2.RightButtonId;
     private bool _capturingClick;
     private DateTime _friendListDeadline = DateTime.MinValue;
     private bool _menuWasOpenAtTrigger;
@@ -273,26 +271,12 @@ public sealed unsafe class FriendRemover : IDisposable
                 }
                 if (now > _contextMenuDeadline)
                 {
-                    if (SyncTestMode && _syncTestButtonIndex + 1 < FullAutoV2.CalibrationButtonIds.Length)
-                    {
-                        // Calibration: this button id didn't open the menu — try the next one.
-                        _syncTestButtonIndex++;
-                        var triedId = _lastSynthButtonId;
-                        var nextId = FullAutoV2.CalibrationButtonIds[_syncTestButtonIndex];
-                        ReportSyncTest($"ButtonId={triedId} didn't open the menu. Trying ButtonId={nextId}...");
-                        if (_current != null && TriggerFullAutomationV2(_current, nextId))
-                        {
-                            _step = Step.WaitingForContextMenu;
-                            break;
-                        }
-                        ReportSyncTest($"Re-trigger failed: {Error}");
-                    }
                     if (SyncTestMode)
                     {
-                        ReportSyncTest($"No context menu opened for {_current?.Name} within {ContextMenuTimeout.TotalSeconds}s. The right-click synthesis parameters need adjusting — see the dalamud log.");
+                        ReportSyncTest($"No context menu opened for {_current?.Name} within {ContextMenuTimeout.TotalSeconds}s — see the dalamud log.");
                         SyncTestMode = false;
                     }
-                    Fail($"The context menu never opened for {_current?.Name} after the synthesized right-click.");
+                    Fail($"The context menu never opened for {_current?.Name}.");
                 }
                 StateChanged?.Invoke();
                 break;
@@ -341,7 +325,6 @@ public sealed unsafe class FriendRemover : IDisposable
         _queue.Enqueue(entry);
         TotalCount = 1;
         SyncTestMode = true;
-        _syncTestButtonIndex = 0;
         _current = _queue.Dequeue();
         _confirmClicked = false;
         ReportSyncTest($"Starting synctest for '{entry.Name}' (contentId={entry.ContentId}).");
@@ -642,7 +625,7 @@ public sealed unsafe class FriendRemover : IDisposable
 
             if (SyncTestMode)
             {
-                ReportSyncTest($"SUCCESS: context menu opened with target '{targetName}' (ButtonId={_lastSynthButtonId}) — the synthesized right-click works! No removal performed (synctest only).");
+                ReportSyncTest($"SUCCESS: context menu opened with target '{targetName}' via AgentContext — no removal performed (synctest only).");
                 SyncTestMode = false;
                 _current = null;
                 _step = Step.Finished;
@@ -694,35 +677,29 @@ public sealed unsafe class FriendRemover : IDisposable
     {
         try
         {
-            var addon = FullAutoV2.GetFriendListAddon(_gameGui);
-            if (addon == null)
+            // v3: use the game's own AgentContext — set the target and open the
+            // menu directly, like inventory/retainer plugins do. No mouse synthesis.
+            var agentModule = AgentModule.Instance();
+            if (agentModule == null)
             {
-                Error = "FriendList addon not available.";
+                Error = "AgentModule not available.";
                 return false;
             }
-
-            var list = addon->FriendList;
-            if (list == null)
+            var ctxAgent = agentModule->GetAgentByInternalId(AgentId.Context);
+            if (ctxAgent == null || ctxAgent == (AgentInterface*)nint.Zero)
             {
-                Error = "FriendList list component not available.";
+                Error = "AgentContext not available.";
                 return false;
             }
+            var ctx = (AgentContext*)ctxAgent;
 
-            var rowIndex = FullAutoV2.FindFriendRowIndex(addon, entry.Name, _log);
-            if (rowIndex < 0)
-            {
-                Error = $"Couldn't find '{entry.Name}' in the Friend List UI. They may be scrolled out of view — scroll the list and try again.";
-                return false;
-            }
-
-            FullAutoV2.EnsureVisible(list, rowIndex, _log);
-
-            var buttonId = buttonIdOverride
-                ?? (SyncTestMode ? FullAutoV2.CalibrationButtonIds[_syncTestButtonIndex] : FullAutoV2.RightButtonId);
-            _lastSynthButtonId = buttonId;
             _menuWasOpenAtTrigger = FullAutoV2.IsContextMenuVisible(_gameGui);
-            _log.Info($"[FAV2] Synthesizing right-click on row {rowIndex} for {entry.Name}.");
-            FullAutoV2.SynthesizeRightClick(list, rowIndex, buttonId, _log);
+            _log.Info($"[FAV2] Opening context menu via AgentContext for '{entry.Name}'.");
+            if (!FullAutoV2.OpenFriendContextMenu(ctx, entry, _log))
+            {
+                Error = "AgentContext.OpenContextMenu failed.";
+                return false;
+            }
 
             // The result is verified when the context menu opens (or times out).
             _contextMenuDeadline = DateTime.UtcNow + ContextMenuTimeout;

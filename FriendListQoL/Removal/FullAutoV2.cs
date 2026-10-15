@@ -2,6 +2,7 @@ using System;
 using System.Text;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace FriendListQoL.Removal;
@@ -40,6 +41,35 @@ public static unsafe class FullAutoV2
     /// which one opens the context menu.
     /// </summary>
     public const byte RightButtonId = 1;
+
+    /// <summary>
+    /// Opens the context menu for a friend via the game's own AgentContext —
+    /// the same path inventory/retainer plugins use. Sets the target fields
+    /// directly and calls the game's OpenContextMenu: no mouse synthesis,
+    /// no position math, no button calibration.
+    /// </summary>
+    public static bool OpenFriendContextMenu(AgentContext* ctx, Models.FriendEntry entry, IPluginLog log)
+    {
+        try
+        {
+            if (ctx == null)
+            {
+                log.Warning("[FAV2] AgentContext not available.");
+                return false;
+            }
+            ctx->TargetContentId = entry.ContentId;
+            ctx->TargetHomeWorldId = (short)entry.HomeWorldId;
+            ctx->TargetName.SetString(entry.Name);
+            ctx->OpenContextMenu();
+            log.Info($"[FAV2] OpenContextMenu called for '{entry.Name}' (contentId={entry.ContentId}).");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            log.Error($"[FAV2] OpenFriendContextMenu threw {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
 
     /// <summary>Button ids the synctest calibrates through, in try order.</summary>
     public static readonly byte[] CalibrationButtonIds = { 1, 2 };
