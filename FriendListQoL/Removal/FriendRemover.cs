@@ -16,9 +16,12 @@ namespace FriendListQoL.Removal;
 /// Removes friends one at a time through the game's own remove-friend flow,
 /// with a configurable delay between each removal. Favorites are never queued.
 /// <para/>
-/// The queue, pacing, confirmation handling and safety logic are complete.
-/// The single step that drives the game's UI (<see cref="TriggerGameRemove"/>)
-/// needs in-game calibration — see the comment there and README.
+/// Two modes: GUIDED (default) — the user right-clicks → Remove per friend and
+/// the plugin auto-confirms the dialog after the prompt-name safety check.
+/// FULL-AUTO v2 (experimental, <c>/flqol fullauto</c>) — the plugin synthesizes
+/// a right-click on the friend's list row via the list's own event handler,
+/// letting the game's code open the context menu with the correct target, then
+/// activates the Remove item. Validate with <c>/flqol synctest</c> first.
 /// </summary>
 public sealed unsafe class FriendRemover : IDisposable
 {
@@ -26,6 +29,7 @@ public sealed unsafe class FriendRemover : IDisposable
     {
         Idle,
         Triggering,
+        WaitingForContextMenu,
         WaitingForConfirm,
         CoolingDown,
         Finished,
@@ -34,9 +38,13 @@ public sealed unsafe class FriendRemover : IDisposable
 
     private const string FriendListAddonName = "FriendList";
     private const string ConfirmAddonName = "SelectYesno";
+    private const string ContextMenuAddonName = "ContextMenu";
 
     /// <summary>How long to wait for the game's confirm dialog after triggering a removal.</summary>
     private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromSeconds(8);
+
+    /// <summary>How long to wait for the context menu after a synthesized right-click.</summary>
+    private static readonly TimeSpan ContextMenuTimeout = TimeSpan.FromSeconds(8);
 
     private readonly IPluginLog _log;
     private readonly IFramework _framework;
@@ -51,8 +59,19 @@ public sealed unsafe class FriendRemover : IDisposable
     private FriendEntry? _current;
     private DateTime _nextActionAt = DateTime.MinValue;
     private DateTime _confirmDeadline = DateTime.MinValue;
+    private DateTime _contextMenuDeadline = DateTime.MinValue;
     private DateTime _simConfirmAt = DateTime.MinValue;
     private bool _confirmClicked;
+
+    /// <summary>
+    /// When true, the v2 flow stops after the context menu opens (used by
+    /// <c>/flqol synctest</c>): it verifies the menu target but never clicks
+    /// Remove. Safe calibration with zero removal risk.
+    /// </summary>
+    public bool SyncTestMode { get; set; }
+
+    /// <summary>Reports synctest progress to the caller (chat).</summary>
+    public Action<string>? SyncTestReport { get; set; }
 
     public bool IsRunning => _step is Step.Triggering or Step.WaitingForConfirm or Step.CoolingDown;
     public bool HasFinished => _step == Step.Finished;
@@ -62,7 +81,7 @@ public sealed unsafe class FriendRemover : IDisposable
     /// True when we're waiting for the user to manually trigger the remove
     /// (right-click → Remove from Friend List) in guided mode.
     /// </summary>
-    public bool IsWaitingForUser => _step == Step.WaitingForConfirm && !SimulateRemovals && !_confirmClicked;
+    public bool IsWaitingForUser => _step == Step.WaitingForConfirm && !SimulateRemovals && !_confirmClicked && !AttemptFullAutomation;
 
     public int TotalCount { get; private set; }
     public int RemovedCount => _removedNames.Count;
@@ -92,6 +111,7 @@ public sealed unsafe class FriendRemover : IDisposable
         _config = config;
 
         _addonLifecycle.RegisterListener(AddonEvent.PostSetup, ConfirmAddonName, OnConfirmDialogOpened);
+        _addonLifecycle.RegisterListener(AddonEvent.PostSetup, ContextMenuAddonName, OnContextMenuOpened);
         _framework.Update += OnFrameworkUpdate;
     }
 
@@ -99,6 +119,7 @@ public sealed unsafe class FriendRemover : IDisposable
     {
         _framework.Update -= OnFrameworkUpdate;
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, ConfirmAddonName, OnConfirmDialogOpened);
+        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, ContextMenuAddonName, OnContextMenuOpened);
     }
 
     /// <summary>
@@ -114,6 +135,7 @@ public sealed unsafe class FriendRemover : IDisposable
         _removedNames.Clear();
         Error = null;
         _current = null;
+        SyncTestMode = false;
 
         foreach (var entry in targets.Where(e => !_config.IsFavorite(e.ContentId)))
             _queue.Enqueue(entry);
@@ -170,8 +192,16 @@ public sealed unsafe class FriendRemover : IDisposable
                 _confirmClicked = false;
                 if (TriggerGameRemove(_current))
                 {
-                    _step = Step.WaitingForConfirm;
-                    _confirmDeadline = now + ConfirmTimeout;
+                    if (AttemptFullAutomation && !SimulateRemovals)
+                    {
+                        // v2: TriggerFullAutomationV2 already set _contextMenuDeadline.
+                        _step = Step.WaitingForContextMenu;
+                    }
+                    else
+                    {
+                        _step = Step.WaitingForConfirm;
+                        _confirmDeadline = now + ConfirmTimeout;
+                    }
                     _simConfirmAt = now + TimeSpan.FromMilliseconds(600); // fake dialog round-trip
                 }
                 else
@@ -190,8 +220,21 @@ public sealed unsafe class FriendRemover : IDisposable
                 else if (!IsWaitingForUser && now > _confirmDeadline)
                 {
                     // Guided mode: no timeout, user triggers at their own pace.
-                    // This branch is for fully-automated mode (not yet implemented).
+                    // Full-auto v2: the dialog should already be on its way.
                     Fail($"The game's confirmation dialog never appeared for {_current?.Name}.");
+                }
+                StateChanged?.Invoke();
+                break;
+
+            case Step.WaitingForContextMenu:
+                if (now > _contextMenuDeadline)
+                {
+                    if (SyncTestMode)
+                    {
+                        ReportSyncTest($"No context menu opened for {_current?.Name} within {ContextMenuTimeout.TotalSeconds}s. The right-click synthesis parameters need adjusting — see the dalamud log.");
+                        SyncTestMode = false;
+                    }
+                    Fail($"The context menu never opened for {_current?.Name} after the synthesized right-click.");
                 }
                 StateChanged?.Invoke();
                 break;
@@ -215,6 +258,45 @@ public sealed unsafe class FriendRemover : IDisposable
         _step = Step.Failed;
         _current = null;
         _log.Error($"Friend purge failed: {message} ({_removedNames.Count} of {TotalCount} removed before the failure.)");
+    }
+
+    private void ReportSyncTest(string message)
+    {
+        _log.Info($"[SYNCTEST] {message}");
+        try { SyncTestReport?.Invoke(message); } catch { /* never break the flow for chat */ }
+    }
+
+    /// <summary>
+    /// Starts a safe single-shot calibration: finds the friend's row and
+    /// synthesizes a right-click, then reports whether the context menu
+    /// opened with the right target. Never clicks Remove — zero removal risk.
+    /// The Friend List window must be open. Favorites are NOT filtered here
+    /// on purpose: the target is never removed.
+    /// </summary>
+    public void BeginSyncTest(FriendEntry entry)
+    {
+        if (IsRunning)
+            return;
+        _queue.Clear();
+        _removedNames.Clear();
+        Error = null;
+        _queue.Enqueue(entry);
+        TotalCount = 1;
+        SyncTestMode = true;
+        _current = _queue.Dequeue();
+        _confirmClicked = false;
+        ReportSyncTest($"Starting synctest for '{entry.Name}' (contentId={entry.ContentId}).");
+        if (TriggerFullAutomationV2(_current))
+        {
+            _step = Step.WaitingForContextMenu;
+            _contextMenuDeadline = DateTime.UtcNow + ContextMenuTimeout;
+        }
+        else
+        {
+            SyncTestMode = false;
+            Fail(Error ?? "Failed to trigger the synthesized right-click.");
+        }
+        StateChanged?.Invoke();
     }
 
     /// <summary>
@@ -295,8 +377,9 @@ public sealed unsafe class FriendRemover : IDisposable
     }
 
     /// <summary>
-    /// When true, attempts full automation by setting the agent selection and
-    /// triggering the remove dialog programmatically. When false (default),
+    /// When true, attempts full automation via UI event synthesis (v2): the
+    /// plugin right-clicks the friend's list row through the game's own event
+    /// pipeline instead of asking the user to do it. When false (default),
     /// uses guided mode where the user manually right-clicks → Remove.
     /// </summary>
     public bool AttemptFullAutomation { get; set; } = false;
@@ -343,45 +426,133 @@ public sealed unsafe class FriendRemover : IDisposable
     }
 
     /// <summary>
+    /// Fired when the game's context menu opens. In full-auto v2 mode, verifies
+    /// the menu target is the queued friend, then activates the Remove item.
+    /// In synctest mode, reports the target and stops — never removes.
+    /// <para/>
+    /// SAFETY: the menu must target the queued friend's name; otherwise we
+    /// refuse to click Remove, exactly like the SelectYesno prompt check.
+    /// </summary>
+    private unsafe void OnContextMenuOpened(AddonEvent type, AddonArgs args)
+    {
+        if (_step != Step.WaitingForContextMenu || _current == null)
+            return;
+        if (!AttemptFullAutomation && !SyncTestMode)
+            return;
+
+        try
+        {
+            var agentModule = AgentModule.Instance();
+            string targetName = string.Empty;
+            if (agentModule != null)
+            {
+                var ctxAgent = agentModule->GetAgentByInternalId(AgentId.Context);
+                if (ctxAgent != null && ctxAgent != (AgentInterface*)nint.Zero)
+                    targetName = ((AgentContext*)ctxAgent)->TargetName.ToString();
+            }
+
+            _log.Info($"[FAV2] Context menu opened. AgentContext target='{targetName}', expected='{_current.Name}'.");
+            var firstName = _current.Name.Split(' ')[0];
+            if (string.IsNullOrEmpty(targetName) ||
+                !targetName.Contains(firstName, StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = $"Context menu target '{targetName}' doesn't match expected friend '{_current.Name}'. NOT clicking Remove.";
+                _log.Warning($"[FAV2] {msg}");
+                if (SyncTestMode)
+                {
+                    ReportSyncTest(msg + " (synthesis reached the menu but targeted the wrong row — check the row mapping.)");
+                    SyncTestMode = false;
+                }
+                Fail(msg);
+                return;
+            }
+
+            if (SyncTestMode)
+            {
+                ReportSyncTest($"SUCCESS: context menu opened with target '{targetName}' — the synthesized right-click works! No removal performed (synctest only).");
+                SyncTestMode = false;
+                _current = null;
+                _step = Step.Finished;
+                _log.Info("[FAV2] Synctest finished successfully.");
+                StateChanged?.Invoke();
+                return;
+            }
+
+            var menuAddon = (AtkUnitBase*)(nint)args.Addon;
+            if (!FullAutoV2.ActivateRemoveMenuItem(menuAddon, _log))
+            {
+                Fail($"Couldn't activate '{FullAutoV2.RemoveMenuItemText}' in the context menu for {_current.Name}.");
+                return;
+            }
+
+            _step = Step.WaitingForConfirm;
+            _confirmDeadline = DateTime.UtcNow + ConfirmTimeout;
+            _log.Info($"[FAV2] Remove item activated for {_current.Name}; waiting for the confirmation dialog.");
+        }
+        catch (Exception ex)
+        {
+            Fail($"Context menu handling failed: {ex.Message}");
+        }
+        StateChanged?.Invoke();
+    }
+
+    /// <summary>
     /// Attempts full automation: sets the agent selection to target the friend,
     /// then triggers the remove confirmation dialog programmatically.
     /// ⚠ EXPERIMENTAL: Test on one friend first with auto-confirm DISABLED!
     /// </summary>
     private unsafe bool TriggerFullAutomation(FriendEntry entry)
     {
+        // v2: UI event synthesis. The v1.0.11 memory-write approach
+        // (AgentFriendlist.SelectedContentId) is dead — the game's own
+        // right-click handling stomps it (see calibration-5.log).
+        return TriggerFullAutomationV2(entry);
+    }
+
+    /// <summary>
+    /// Full-auto v2: find the friend's row in the FriendList UI, synthesize a
+    /// right-click on it so the game's own code opens the context menu with
+    /// the correct target, then let <see cref="OnContextMenuOpened"/> take it
+    /// from there. Guided mode is untouched — this only runs when
+    /// <see cref="AttemptFullAutomation"/> is on.
+    /// </summary>
+    private unsafe bool TriggerFullAutomationV2(FriendEntry entry)
+    {
         try
         {
-            var agentModule = AgentModule.Instance();
-            if (agentModule == null)
+            var addon = FullAutoV2.GetFriendListAddon(_gameGui);
+            if (addon == null)
             {
-                Error = "AgentModule not available.";
+                Error = "FriendList addon not available.";
                 return false;
             }
 
-            // Set AgentFriendlist selection to target this friend
-            var friendAgent = (AgentFriendlist*)agentModule->GetAgentByInternalId(AgentId.Friendlist);
-            if (friendAgent == null || friendAgent == (AgentFriendlist*)nint.Zero)
+            var list = addon->FriendList;
+            if (list == null)
             {
-                Error = "AgentFriendlist not available.";
+                Error = "FriendList list component not available.";
                 return false;
             }
 
-            friendAgent->SelectedContentId = entry.ContentId;
-            _log.Info($"[FULL-AUTO] Set AgentFriendlist.SelectedContentId={entry.ContentId} for {entry.Name}");
+            var rowIndex = FullAutoV2.FindFriendRowIndex(addon, entry.Name, _log);
+            if (rowIndex < 0)
+            {
+                Error = $"Couldn't find '{entry.Name}' in the Friend List UI. They may be scrolled out of view — scroll the list and try again.";
+                return false;
+            }
 
-            // For the safe test: we set the selection but DON'T auto-trigger the dialog.
-            // The user manually right-clicks → Remove on ANY friend.
-            // If the dialog prompt shows OUR target's name (not the right-clicked friend),
-            // then the selection override works and we can proceed with full automation.
-            // For now, fall through to guided mode behavior (wait for user to trigger).
-            
-            _log.Warning($"[FULL-AUTO] Selection set for {entry.Name}. Manually right-click → Remove on any friend. If the dialog shows '{entry.Name}', the override works!");
-            _confirmDeadline = DateTime.MaxValue;
+            FullAutoV2.EnsureVisible(list, rowIndex, _log);
+
+            _log.Info($"[FAV2] Synthesizing right-click on row {rowIndex} for {entry.Name}.");
+            FullAutoV2.SynthesizeRightClick(list, rowIndex, _log);
+
+            // The result is verified when the context menu opens (or times out).
+            _contextMenuDeadline = DateTime.UtcNow + ContextMenuTimeout;
             return true;
         }
         catch (Exception ex)
         {
-            Error = $"Full automation failed: {ex.Message}";
+            Error = $"Full-auto v2 failed: {ex.Message}";
             _log.Error(Error);
             return false;
         }

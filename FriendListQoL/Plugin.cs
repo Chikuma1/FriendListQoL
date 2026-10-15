@@ -126,8 +126,24 @@ public sealed class Plugin : IDalamudPlugin
         else if (arg.Equals("fullauto", StringComparison.OrdinalIgnoreCase))
         {
             FriendRemover.AttemptFullAutomation = !FriendRemover.AttemptFullAutomation;
-            var status = FriendRemover.AttemptFullAutomation ? "ON (experimental)" : "OFF (guided mode)";
+            var status = FriendRemover.AttemptFullAutomation ? "ON (experimental v2)" : "OFF (guided mode)";
             _chatGui.Print($"[FLQoL] Full automation attempt: {status}");
+        }
+        else if (arg.StartsWith("synctest ", StringComparison.OrdinalIgnoreCase))
+        {
+            var name = arg.Substring("synctest ".Length).Trim();
+            var friend = FriendCache.Friends.FirstOrDefault(f =>
+                f.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
+            if (friend == null)
+            {
+                _chatGui.Print($"[FLQoL] No friend matching '{name}' found.");
+            }
+            else
+            {
+                FriendRemover.SyncTestReport = msg => _chatGui.Print($"[FLQoL synctest] {msg}");
+                _chatGui.Print($"[FLQoL] Synctest targeting '{friend.Name}' — safe, nothing will be removed. Open your Friend List first.");
+                FriendRemover.BeginSyncTest(friend);
+            }
         }
         else if (arg.StartsWith("setselect ", StringComparison.OrdinalIgnoreCase))
         {
