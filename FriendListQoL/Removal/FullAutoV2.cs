@@ -150,7 +150,7 @@ public static unsafe class FullAutoV2
             atkEvent->NextEvent = null;
 
             log.Info($"[FAV2] HandleMouseDown(listIndex={listIndex}, ButtonId={buttonId}, pos=({posX},{posY}), targetNode={(nint)targetNode:X})...");
-            var downResult = list->HandleMouseDown(atkEvent, mouseData, 0, listIndex);
+            var downResult = list->HandleMouseDown(atkEvent, mouseData);
             log.Info($"[FAV2] HandleMouseDown returned {downResult}.");
             log.Info($"[FAV2] HandleMouseUp(listIndex={listIndex}, ButtonId={buttonId}, pos=({posX},{posY}), targetNode={(nint)targetNode:X})...");
             var upResult = list->HandleMouseUp(atkEvent, mouseData, 0, listIndex);
