@@ -248,7 +248,18 @@ public class MainWindow : Window, IDisposable
             if (ImGui.Button(confirmLabel, new Vector2(200, 0)))
             {
                 _purgeArmed = false;
+                remover.AttemptFullAutomation = false;
                 remover.Start(selected);
+            }
+            if (!_plugin.TestMode)
+            {
+                ImGui.SameLine();
+                if (ImGui.Button("Yes, start full auto purge", new Vector2(200, 0)))
+                {
+                    _purgeArmed = false;
+                    remover.AttemptFullAutomation = true;
+                    remover.Start(selected);
+                }
             }
             ImGui.SameLine();
             if (ImGui.Button("Cancel", new Vector2(110, 0)))
