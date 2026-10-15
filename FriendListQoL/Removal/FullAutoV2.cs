@@ -45,6 +45,33 @@ public static unsafe class FullAutoV2
     public static readonly byte[] CalibrationButtonIds = { 1, 2 };
 
     /// <summary>
+    /// Returns true if the game's context-menu addon currently exists and is
+    /// visible. The ContextMenu addon is persistent (created once and reused),
+    /// so PostSetup only fires the first time — polling visibility is the
+    /// reliable way to detect it opening.
+    /// </summary>
+    public static bool IsContextMenuVisible(IGameGui gameGui)
+    {
+        var ptr = gameGui.GetAddonByName("ContextMenu");
+        if (ptr == nint.Zero)
+            return false;
+        var addon = (AtkUnitBase*)ptr.Address;
+        return addon->IsVisible;
+    }
+
+    /// <summary>Returns the ContextMenu addon's root-node position, if present.</summary>
+    public static (short X, short Y) GetContextMenuPosition(IGameGui gameGui)
+    {
+        var ptr = gameGui.GetAddonByName("ContextMenu");
+        if (ptr == nint.Zero)
+            return (0, 0);
+        var addon = (AtkUnitBase*)ptr.Address;
+        if (addon->RootNode == null)
+            return (0, 0);
+        return ((short)addon->RootNode->X, (short)addon->RootNode->Y);
+    }
+
+    /// <summary>
     /// Calibration offset (UI pixels) added to the computed click position.
     /// Set from Configuration on startup and by /flqol capclick.
     /// </summary>

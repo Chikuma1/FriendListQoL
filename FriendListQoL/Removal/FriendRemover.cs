@@ -68,6 +68,7 @@ public sealed unsafe class FriendRemover : IDisposable
     private byte _lastSynthButtonId = FullAutoV2.RightButtonId;
     private bool _capturingClick;
     private DateTime _friendListDeadline = DateTime.MinValue;
+    private bool _menuWasOpenAtTrigger;
 
     /// <summary>How long to wait for the Friend List to open after /friendlist.</summary>
     private static readonly TimeSpan FriendListTimeout = TimeSpan.FromSeconds(5);
@@ -121,7 +122,8 @@ public sealed unsafe class FriendRemover : IDisposable
         _config = config;
 
         _addonLifecycle.RegisterListener(AddonEvent.PostSetup, ConfirmAddonName, OnConfirmDialogOpened);
-        _addonLifecycle.RegisterListener(AddonEvent.PostSetup, ContextMenuAddonName, OnContextMenuOpened);
+        // Note: ContextMenu PostSetup is NOT used — the addon is persistent,
+        // so we poll IsContextMenuVisible instead (see OnFrameworkUpdate).
         _framework.Update += OnFrameworkUpdate;
     }
 
@@ -129,7 +131,6 @@ public sealed unsafe class FriendRemover : IDisposable
     {
         _framework.Update -= OnFrameworkUpdate;
         _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, ConfirmAddonName, OnConfirmDialogOpened);
-        _addonLifecycle.UnregisterListener(AddonEvent.PostSetup, ContextMenuAddonName, OnContextMenuOpened);
     }
 
     /// <summary>
@@ -190,6 +191,15 @@ public sealed unsafe class FriendRemover : IDisposable
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        // Click-capture calibration watches for the menu independently of the
+        // purge state machine.
+        if (_capturingClick && FullAutoV2.IsContextMenuVisible(_gameGui))
+        {
+            HandleClickCapture();
+            StateChanged?.Invoke();
+            return;
+        }
+
         if (!IsRunning)
             return;
 
@@ -254,6 +264,13 @@ public sealed unsafe class FriendRemover : IDisposable
                 StateChanged?.Invoke();
                 break;
             case Step.WaitingForContextMenu:
+                // The ContextMenu addon is persistent, so PostSetup is not a
+                // reliable open signal — poll visibility instead.
+                if (!_menuWasOpenAtTrigger && FullAutoV2.IsContextMenuVisible(_gameGui))
+                {
+                    HandleContextMenuOpened();
+                    break;
+                }
                 if (now > _contextMenuDeadline)
                 {
                     if (SyncTestMode && _syncTestButtonIndex + 1 < FullAutoV2.CalibrationButtonIds.Length)
@@ -396,7 +413,7 @@ public sealed unsafe class FriendRemover : IDisposable
     /// menu's screen position (it opens at the cursor) and the targeted
     /// friend, diffs against our computed row position, and saves the offset.
     /// </summary>
-    private void HandleClickCapture(AddonArgs args)
+    private void HandleClickCapture()
     {
         _capturingClick = false;
         try
@@ -410,13 +427,7 @@ public sealed unsafe class FriendRemover : IDisposable
                     targetName = ((AgentContext*)ctxAgent)->TargetName.ToString();
             }
 
-            var menu = (AtkUnitBase*)args.Addon.Address;
-            short menuX = 0, menuY = 0;
-            if (menu != null && menu->RootNode != null)
-            {
-                menuX = (short)menu->RootNode->X;
-                menuY = (short)menu->RootNode->Y;
-            }
+            (short menuX, short menuY) = FullAutoV2.GetContextMenuPosition(_gameGui);
 
             var addon = FullAutoV2.GetFriendListAddon(_gameGui);
             int rowIndex = -1;
@@ -586,20 +597,17 @@ public sealed unsafe class FriendRemover : IDisposable
     }
 
     /// <summary>
-    /// Fired when the game's context menu opens. In full-auto v2 mode, verifies
-    /// the menu target is the queued friend, then activates the Remove item.
-    /// In synctest mode, reports the target and stops — never removes.
+    /// Handles the game's context menu opening (detected by polling
+    /// visibility, since the addon is persistent). In full-auto v2 mode,
+    /// verifies the menu target is the queued friend, then activates the
+    /// Remove item. In synctest mode, reports the target and stops — never
+    /// removes.
     /// <para/>
     /// SAFETY: the menu must target the queued friend's name; otherwise we
     /// refuse to click Remove, exactly like the SelectYesno prompt check.
     /// </summary>
-    private unsafe void OnContextMenuOpened(AddonEvent type, AddonArgs args)
+    private unsafe void HandleContextMenuOpened()
     {
-        if (_capturingClick)
-        {
-            HandleClickCapture(args);
-            return;
-        }
         if (_step != Step.WaitingForContextMenu || _current == null)
             return;
         if (!AttemptFullAutomation && !SyncTestMode)
@@ -643,8 +651,9 @@ public sealed unsafe class FriendRemover : IDisposable
                 return;
             }
 
-            var menuAddon = (AtkUnitBase*)(nint)args.Addon;
-            if (!FullAutoV2.ActivateRemoveMenuItem(menuAddon, _log))
+            var menuPtr = _gameGui.GetAddonByName(ContextMenuAddonName);
+            var menuAddon = menuPtr == nint.Zero ? null : (AtkUnitBase*)menuPtr.Address;
+            if (menuAddon == null || !FullAutoV2.ActivateRemoveMenuItem(menuAddon, _log))
             {
                 Fail($"Couldn't activate '{FullAutoV2.RemoveMenuItemText}' in the context menu for {_current.Name}.");
                 return;
@@ -711,6 +720,7 @@ public sealed unsafe class FriendRemover : IDisposable
             var buttonId = buttonIdOverride
                 ?? (SyncTestMode ? FullAutoV2.CalibrationButtonIds[_syncTestButtonIndex] : FullAutoV2.RightButtonId);
             _lastSynthButtonId = buttonId;
+            _menuWasOpenAtTrigger = FullAutoV2.IsContextMenuVisible(_gameGui);
             _log.Info($"[FAV2] Synthesizing right-click on row {rowIndex} for {entry.Name}.");
             FullAutoV2.SynthesizeRightClick(list, rowIndex, buttonId, _log);
 
