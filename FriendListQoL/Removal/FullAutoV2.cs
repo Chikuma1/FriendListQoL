@@ -57,6 +57,23 @@ public static unsafe class FullAutoV2
                 log.Warning("[FAV2] AgentContext not available.");
                 return false;
             }
+
+            // Set up a clean friend target. The ContextMenuTarget CharacterData
+            // must be cleared first — stale data (e.g. from a retainer) makes
+            // the game open the wrong menu type.
+            var targetPtr = (byte*)&ctx->ContextMenuTarget;
+            var targetSize = sizeof(FFXIVClientStructs.FFXIV.Client.UI.Info.InfoProxyCommonList.CharacterData);
+            for (var i = 0; i < targetSize; i++)
+                targetPtr[i] = 0;
+            *(ulong*)(targetPtr + 0) = entry.ContentId;          // ContentId @ 0
+            *(ushort*)(targetPtr + 40) = entry.HomeWorldId;      // HomeWorld @ 40
+            *(targetPtr + 49) = entry.JobId;                     // Job @ 49
+            var nameBytes = Encoding.UTF8.GetBytes(entry.Name);
+            var nameLen = Math.Min(nameBytes.Length, 31);
+            for (var i = 0; i < nameLen; i++)
+                targetPtr[50 + i] = nameBytes[i];                // _name @ 50
+            targetPtr[50 + nameLen] = 0;
+
             ctx->TargetContentId = entry.ContentId;
             ctx->TargetHomeWorldId = (short)entry.HomeWorldId;
             ctx->TargetName.SetString(entry.Name);
