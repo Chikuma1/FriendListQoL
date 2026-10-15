@@ -35,10 +35,36 @@ public static unsafe class FullAutoV2
     public const string RemoveMenuItemText = "Remove from Friend List";
 
     /// <summary>
-    /// Guess for the right mouse button id in <c>AtkMouseData</c>.
-    /// CALIBRATION ITEM #1 — synctest will show whether the context menu opens.
+    /// Default guess for the right mouse button id in <c>AtkMouseData</c>.
+    /// Synctest tries <see cref="CalibrationButtonIds"/> in order and reports
+    /// which one opens the context menu.
     /// </summary>
     public const byte RightButtonId = 1;
+
+    /// <summary>Button ids the synctest calibrates through, in try order.</summary>
+    public static readonly byte[] CalibrationButtonIds = { 1, 2 };
+
+    /// <summary>
+    /// Computes the screen-space center of a node by walking up the parent
+    /// chain. A child point (px,py) in node N's local space maps to
+    /// N's parent space as (N.X + px * N.ScaleX, N.Y + py * N.ScaleY).
+    /// Rotation is ignored (zero for list rows).
+    /// </summary>
+    public static (short X, short Y) GetNodeScreenCenter(AtkResNode* node)
+    {
+        if (node == null)
+            return (0, 0);
+        float lx = node->Width / 2f;
+        float ly = node->Height / 2f;
+        var n = node;
+        while (n->ParentNode != null)
+        {
+            lx = n->X + lx * n->ScaleX;
+            ly = n->Y + ly * n->ScaleY;
+            n = n->ParentNode;
+        }
+        return ((short)lx, (short)ly);
+    }
 
     public static AddonFriendList* GetFriendListAddon(IGameGui gameGui)
     {
@@ -90,13 +116,14 @@ public static unsafe class FullAutoV2
     }
 
     /// <summary>
-    /// Synthesizes a right mouse-button release on the given list item by
-    /// calling the list's own mouse-up handler with right-button mouse data.
-    /// If the parameters are right, the game's code opens the context menu
-    /// with this row's friend as the target — exactly as a real right-click.
-    /// Returns the handler's result. Any exception is logged, never thrown.
+    /// Synthesizes a mouse-button release on the given list item by
+    /// calling the list's own mouse-up handler with mouse data aimed at the
+    /// row's screen-space center. If the parameters are right, the game's
+    /// code opens the context menu with this row's friend as the target —
+    /// exactly as a real click. Returns the handler's result.
+    /// Any exception is logged, never thrown.
     /// </summary>
-    public static bool SynthesizeRightClick(AtkComponentList* list, int listIndex, IPluginLog log)
+    public static bool SynthesizeRightClick(AtkComponentList* list, int listIndex, byte buttonId, IPluginLog log)
     {
         try
         {
@@ -105,11 +132,13 @@ public static unsafe class FullAutoV2
             if (renderer != null && renderer->OwnerNode != null)
                 targetNode = (AtkResNode*)renderer->OwnerNode;
 
+            var (posX, posY) = GetNodeScreenCenter(targetNode);
+
             var mouseData = stackalloc AtkEventData.AtkMouseData[1];
-            mouseData->PosX = 0;
-            mouseData->PosY = 0;
+            mouseData->PosX = posX;
+            mouseData->PosY = posY;
             mouseData->WheelDirection = 0;
-            mouseData->ButtonId = RightButtonId;
+            mouseData->ButtonId = buttonId;
             mouseData->Modifier = ModifierFlag.None;
 
             var atkEvent = stackalloc AtkEvent[1];
@@ -119,7 +148,7 @@ public static unsafe class FullAutoV2
             atkEvent->Param = 0;
             atkEvent->NextEvent = null;
 
-            log.Info($"[FAV2] HandleMouseUp(listIndex={listIndex}, ButtonId={RightButtonId}, targetNode={(nint)targetNode:X})...");
+            log.Info($"[FAV2] HandleMouseUp(listIndex={listIndex}, ButtonId={buttonId}, pos=({posX},{posY}), targetNode={(nint)targetNode:X})...");
             var result = list->HandleMouseUp(atkEvent, mouseData, 0, listIndex);
             log.Info($"[FAV2] HandleMouseUp returned {result}.");
             return result;

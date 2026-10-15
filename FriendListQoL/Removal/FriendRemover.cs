@@ -62,6 +62,8 @@ public sealed unsafe class FriendRemover : IDisposable
     private DateTime _contextMenuDeadline = DateTime.MinValue;
     private DateTime _simConfirmAt = DateTime.MinValue;
     private bool _confirmClicked;
+    private int _syncTestButtonIndex;
+    private byte _lastSynthButtonId = FullAutoV2.RightButtonId;
 
     /// <summary>
     /// When true, the v2 flow stops after the context menu opens (used by
@@ -229,6 +231,20 @@ public sealed unsafe class FriendRemover : IDisposable
             case Step.WaitingForContextMenu:
                 if (now > _contextMenuDeadline)
                 {
+                    if (SyncTestMode && _syncTestButtonIndex + 1 < FullAutoV2.CalibrationButtonIds.Length)
+                    {
+                        // Calibration: this button id didn't open the menu — try the next one.
+                        _syncTestButtonIndex++;
+                        var triedId = _lastSynthButtonId;
+                        var nextId = FullAutoV2.CalibrationButtonIds[_syncTestButtonIndex];
+                        ReportSyncTest($"ButtonId={triedId} didn't open the menu. Trying ButtonId={nextId}...");
+                        if (_current != null && TriggerFullAutomationV2(_current, nextId))
+                        {
+                            _step = Step.WaitingForContextMenu;
+                            break;
+                        }
+                        ReportSyncTest($"Re-trigger failed: {Error}");
+                    }
                     if (SyncTestMode)
                     {
                         ReportSyncTest($"No context menu opened for {_current?.Name} within {ContextMenuTimeout.TotalSeconds}s. The right-click synthesis parameters need adjusting — see the dalamud log.");
@@ -283,6 +299,7 @@ public sealed unsafe class FriendRemover : IDisposable
         _queue.Enqueue(entry);
         TotalCount = 1;
         SyncTestMode = true;
+        _syncTestButtonIndex = 0;
         _current = _queue.Dequeue();
         _confirmClicked = false;
         ReportSyncTest($"Starting synctest for '{entry.Name}' (contentId={entry.ContentId}).");
@@ -469,7 +486,7 @@ public sealed unsafe class FriendRemover : IDisposable
 
             if (SyncTestMode)
             {
-                ReportSyncTest($"SUCCESS: context menu opened with target '{targetName}' — the synthesized right-click works! No removal performed (synctest only).");
+                ReportSyncTest($"SUCCESS: context menu opened with target '{targetName}' (ButtonId={_lastSynthButtonId}) — the synthesized right-click works! No removal performed (synctest only).");
                 SyncTestMode = false;
                 _current = null;
                 _step = Step.Finished;
@@ -516,7 +533,7 @@ public sealed unsafe class FriendRemover : IDisposable
     /// from there. Guided mode is untouched — this only runs when
     /// <see cref="AttemptFullAutomation"/> is on.
     /// </summary>
-    private unsafe bool TriggerFullAutomationV2(FriendEntry entry)
+    private unsafe bool TriggerFullAutomationV2(FriendEntry entry, byte? buttonIdOverride = null)
     {
         try
         {
@@ -543,8 +560,11 @@ public sealed unsafe class FriendRemover : IDisposable
 
             FullAutoV2.EnsureVisible(list, rowIndex, _log);
 
+            var buttonId = buttonIdOverride
+                ?? (SyncTestMode ? FullAutoV2.CalibrationButtonIds[_syncTestButtonIndex] : FullAutoV2.RightButtonId);
+            _lastSynthButtonId = buttonId;
             _log.Info($"[FAV2] Synthesizing right-click on row {rowIndex} for {entry.Name}.");
-            FullAutoV2.SynthesizeRightClick(list, rowIndex, _log);
+            FullAutoV2.SynthesizeRightClick(list, rowIndex, buttonId, _log);
 
             // The result is verified when the context menu opens (or times out).
             _contextMenuDeadline = DateTime.UtcNow + ContextMenuTimeout;
