@@ -77,6 +77,9 @@ public static unsafe class FullAutoV2
             ctx->TargetContentId = entry.ContentId;
             ctx->TargetHomeWorldId = (short)entry.HomeWorldId;
             ctx->TargetName.SetString(entry.Name);
+            // Point the live target at our freshly-populated struct — otherwise
+            // the game follows a stale pointer (e.g. to retainer data).
+            ctx->CurrentContextMenuTarget = &ctx->ContextMenuTarget;
             ctx->OpenContextMenu();
             log.Info($"[FAV2] OpenContextMenu called for '{entry.Name}' (contentId={entry.ContentId}).");
             return true;
