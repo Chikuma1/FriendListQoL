@@ -80,6 +80,9 @@ public static unsafe class FullAutoV2
             // Point the live target at our freshly-populated struct — otherwise
             // the game follows a stale pointer (e.g. to retainer data).
             ctx->CurrentContextMenuTarget = &ctx->ContextMenuTarget;
+            // Clear any cached menu items so OpenContextMenu rebuilds them for
+            // this target instead of showing the last-opened menu's items.
+            ctx->ClearMenu();
             ctx->OpenContextMenu();
             log.Info($"[FAV2] OpenContextMenu called for '{entry.Name}' (contentId={entry.ContentId}).");
             return true;
