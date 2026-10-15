@@ -546,7 +546,7 @@ public static unsafe class FullAutoV2
             var testText = "FLQoL Test Item";
             fixed (byte* textPtr = System.Text.Encoding.UTF8.GetBytes(testText + "\0"))
             {
-                var cstr = new FFXIVClientStructs.Interop.Generated.CStringPointer(textPtr);
+                var cstr = new InteropGenerator.Runtime.CStringPointer(textPtr);
                 ctx->AddContextMenuItem(999, cstr, false, false, false);
             }
             log.Info("[FAV2] Added test menu item with eventId 999");
