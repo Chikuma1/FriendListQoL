@@ -116,11 +116,12 @@ public static unsafe class FullAutoV2
     }
 
     /// <summary>
-    /// Synthesizes a mouse-button release on the given list item by
-    /// calling the list's own mouse-up handler with mouse data aimed at the
-    /// row's screen-space center. If the parameters are right, the game's
-    /// code opens the context menu with this row's friend as the target —
-    /// exactly as a real click. Returns the handler's result.
+    /// Synthesizes a full mouse-button click (down then up) on the given list
+    /// item by calling the list's own mouse handlers with mouse data aimed at
+    /// the row's screen-space center. A real click is down+up; the context menu
+    /// may open on either. If the parameters are right, the game's code opens
+    /// the context menu with this row's friend as the target — exactly as a
+    /// real click. Returns true if either handler reported handling it.
     /// Any exception is logged, never thrown.
     /// </summary>
     public static bool SynthesizeRightClick(AtkComponentList* list, int listIndex, byte buttonId, IPluginLog log)
@@ -148,10 +149,13 @@ public static unsafe class FullAutoV2
             atkEvent->Param = 0;
             atkEvent->NextEvent = null;
 
+            log.Info($"[FAV2] HandleMouseDown(listIndex={listIndex}, ButtonId={buttonId}, pos=({posX},{posY}), targetNode={(nint)targetNode:X})...");
+            var downResult = list->HandleMouseDown(atkEvent, mouseData, 0, listIndex);
+            log.Info($"[FAV2] HandleMouseDown returned {downResult}.");
             log.Info($"[FAV2] HandleMouseUp(listIndex={listIndex}, ButtonId={buttonId}, pos=({posX},{posY}), targetNode={(nint)targetNode:X})...");
-            var result = list->HandleMouseUp(atkEvent, mouseData, 0, listIndex);
-            log.Info($"[FAV2] HandleMouseUp returned {result}.");
-            return result;
+            var upResult = list->HandleMouseUp(atkEvent, mouseData, 0, listIndex);
+            log.Info($"[FAV2] HandleMouseUp returned {upResult}.");
+            return downResult || upResult;
         }
         catch (Exception ex)
         {
