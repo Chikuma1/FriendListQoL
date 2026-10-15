@@ -167,19 +167,15 @@ public sealed class Plugin : IDalamudPlugin
         }
         else if (arg.StartsWith("testtrigger ", StringComparison.OrdinalIgnoreCase))
         {
-            var idxStr = arg.Substring("testtrigger ".Length).Trim();
-            if (int.TryParse(idxStr, out var idx))
-            {
-                var report = new Action<string>(msg => _chatGui.Print($"[FLQoL testtrigger] {msg}"));
-                FriendListQoL.Removal.FullAutoV2.SyncTestReport = report;
-                _chatGui.Print($"[FLQoL testtrigger] Triggering event index {idx}...");
-                // Note: menu must already be open via synctest or manual right-click
-                FriendListQoL.Removal.FullAutoV2.TestTriggerEvent(idx, _pluginLog);
-            }
-            else
-            {
-                _chatGui.Print("[FLQoL testtrigger] Usage: /flqol testtrigger <index>");
-            }
+            _chatGui.Print("[FLQoL testtrigger] Disabled (crashed game). Use /flqol testadd instead.");
+        }
+        else if (arg.Equals("testadd", StringComparison.OrdinalIgnoreCase))
+        {
+            var report = new Action<string>(msg => _chatGui.Print($"[FLQoL testadd] {msg}"));
+            FriendListQoL.Removal.FullAutoV2.SyncTestReport = report;
+            _chatGui.Print("[FLQoL testadd] Adding test item via AddContextMenuItem...");
+            FriendListQoL.Removal.FullAutoV2.TestAddMenuItem(_pluginLog);
+            _chatGui.Print("[FLQoL testadd] Now manually open a friend context menu to see if 'FLQoL Test Item' appears.");
         }
         else if (arg.Equals("capclick", StringComparison.OrdinalIgnoreCase))
         {

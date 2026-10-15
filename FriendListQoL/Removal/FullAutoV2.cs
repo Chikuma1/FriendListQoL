@@ -534,38 +534,27 @@ public static unsafe class FullAutoV2
         SyncTestReport?.Invoke("Watch stopped.");
     }
 
-    /// <summary>Test triggering a menu event by index (diagnostic).</summary>
-    public static unsafe bool TestTriggerEvent(int eventIndex, IPluginLog log)
+    /// <summary>Test adding a menu item directly via AddContextMenuItem (diagnostic).</summary>
+    public static unsafe bool TestAddMenuItem(IPluginLog log)
     {
         try
         {
             var ctx = AgentContext.Instance();
             if (ctx == null) return false;
-            var mainMenu = &ctx->MainContextMenu;
             
-            // Set the indices
-            mainMenu->CurrentEventIndex = (short)eventIndex;
-            mainMenu->SelectedContextItemIndex = 4; // visual index for Remove
-            
-            // Get the handler pointer (array at offset 1136, each is 8 bytes)
-            byte* handlersBase = (byte*)mainMenu + 1136;
-            nint handlerPtr = *(nint*)(handlersBase + eventIndex * 8);
-            if (handlerPtr == 0)
+            // Add a test item with a known event ID
+            var testText = "FLQoL Test Item";
+            fixed (byte* textPtr = System.Text.Encoding.UTF8.GetBytes(testText + "\0"))
             {
-                log.Warning($"[FAV2] No handler at index {eventIndex}");
-                return false;
+                var cstr = new FFXIVClientStructs.Interop.Generated.CStringPointer(textPtr);
+                ctx->AddContextMenuItem(999, cstr, false, false, false);
             }
-            
-            log.Info($"[FAV2] Calling handler at index {eventIndex} (ptr={handlerPtr:X})");
-            // Try calling ReceiveEvent - parameters are guesses
-            var handler = (AtkModuleInterface.AtkEventInterface*)handlerPtr;
-            // eventType 9 is often "click", param is the index
-            handler->ReceiveEvent(null, null, 9, (ulong)eventIndex);
+            log.Info("[FAV2] Added test menu item with eventId 999");
             return true;
         }
         catch (Exception ex)
         {
-            log.Error($"[FAV2] TestTriggerEvent failed: {ex.Message}");
+            log.Error($"[FAV2] TestAddMenuItem failed: {ex.Message}");
             return false;
         }
     }
